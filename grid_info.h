@@ -102,7 +102,7 @@ public:
   template <typename enum_type>
   void sync_send (enum_type field_num)
   {
-    cudaMemcpy (get_top_copy_dst (field_num), get_top_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault);
+    throw_on_error (cudaMemcpy (get_top_copy_dst (field_num), get_top_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault), __FILE__, __LINE__);
     throw_on_error (cudaMemcpy (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), nx * sizeof (float), cudaMemcpyDeviceToDevice), __FILE__, __LINE__);
   }
 
@@ -201,6 +201,8 @@ public:
   float get_dy () const { return dy; }
 
   int get_own_cells_count () const { return own_nx * own_ny; }
+
+  int get_row_begin_in_process () const { return row_begin_in_process; }
 
 private:
   int own_nx {};
