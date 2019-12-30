@@ -6,18 +6,7 @@
 
 #include "barrier.h"
 #include "grid_info.h"
-
-void throw_on_error (cudaError_t code, const char *file, int line)
-{
-  if (code != cudaSuccess)
-    {
-      std::stringstream ss;
-      ss << "cuda error in " << file << ":" << line << ": " << cudaGetErrorString (code);
-      std::string file_and_line;
-      ss >> file_and_line;
-      throw std::runtime_error (file_and_line);
-    }
-}
+#include "gpu_utils.h"
 
 void prepare_nvlink (const thread_info_class &thread_info)
 {
@@ -62,6 +51,10 @@ int main ()
   int gpus_count {};
   cudaGetDeviceCount (&gpus_count);
 
+  const int grid_size = 10000;
+  const int process_nx = grid_size;
+  const int process_ny = grid_size;
+
   for (int devices_count = 1; devices_count <= gpus_count; devices_count++)
     {
       std::cout << "\nStarting measurement for " << devices_count << std::endl;
@@ -70,12 +63,16 @@ int main ()
       threads.reserve (devices_count);
 
       barrier_class barrier (devices_count);
+      grid_barrier_class grid_barrier (devices_count);
       for (int device_id = 0; device_id < devices_count; device_id++)
         {
           thread_info_class thread_info (device_id, devices_count, barrier);
-          threads.emplace_back([thread_info] () {
+          threads.emplace_back([thread_info, process_nx, process_ny, &grid_barrier] () {
             try {
               prepare_nvlink (thread_info);
+
+              grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (thread_info.thread_id);
+              grid_info_class grid_info (process_nx, process_ny, thread_info, grid_barrier_accessor);
             }
             catch (std::runtime_error &error) {
               std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;
