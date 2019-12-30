@@ -21,7 +21,8 @@ public:
     int devices_count_arg,
     float **grid_arg,
     int nx_arg, int ny_arg,
-    int elements_per_cell_arg)
+    int elements_per_cell_arg,
+    float *cpu_field_arg)
     : own_device_id (device_id_arg)
     , devices_count (devices_count_arg)
     , nx (nx_arg)
@@ -30,6 +31,7 @@ public:
     , push_bottom (push_bottom_arg)
     , grid (grid_arg)
     , elements_per_cell (elements_per_cell_arg)
+    , cpu_field (cpu_field_arg)
   {
     throw_on_error (cudaMalloc (grid + own_device_id, nx * ny * elements_per_cell * sizeof (float)), __FILE__, __LINE__);
 
@@ -131,17 +133,26 @@ private:
   cudaEvent_t *push_bottom {};
   float **grid {};
   const int elements_per_cell {};
+
+public:
+  float *cpu_field {};
 };
 
 class grid_barrier_class
 {
 public:
-  explicit grid_barrier_class (int devices_count_arg)
+  explicit grid_barrier_class (int devices_count_arg, int process_nx, int process_ny)
     : devices_count (devices_count_arg)
     , push_top_done (new cudaEvent_t[2 * devices_count])
     , push_bottom_done (new cudaEvent_t[2 * devices_count])
     , grid (new float*[devices_count])
   {
+    throw_on_error (cudaMallocHost (&cpu_field, process_nx * process_ny * sizeof (float)), __FILE__, __LINE__);
+  }
+
+  ~grid_barrier_class ()
+  {
+    cudaFreeHost (cpu_field);
   }
 
   grid_barrier_accessor_class create_accessor (int device_id, int nx, int ny, int elements_per_cell)
@@ -153,7 +164,8 @@ public:
       devices_count,
       grid.get (),
       nx, ny,
-      elements_per_cell
+      elements_per_cell,
+      cpu_field
     };
   }
 
@@ -163,6 +175,7 @@ private:
   std::unique_ptr<cudaEvent_t[]> push_bottom_done;
 
   std::unique_ptr<float*[]> grid;
+  float *cpu_field {};
 };
 
 class grid_info_class
@@ -172,10 +185,12 @@ public:
   grid_info_class (
     float width_arg,
     float height_arg,
-    int process_nx,
-    int process_ny,
+    int process_nx_arg,
+    int process_ny_arg,
     const thread_info_class &thread_info)
-    : own_nx (process_nx)
+    : process_nx (process_nx_arg)
+    , process_ny (process_ny_arg)
+    , own_nx (process_nx)
     , width (width_arg)
     , height (height_arg)
     , dx (width / static_cast<float> (process_nx))
@@ -203,6 +218,10 @@ public:
   int get_own_cells_count () const { return own_nx * own_ny; }
 
   int get_row_begin_in_process () const { return row_begin_in_process; }
+
+public:
+  const int process_nx {};
+  const int process_ny {};
 
 private:
   int own_nx {};

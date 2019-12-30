@@ -105,7 +105,7 @@ __device__ static float update_curl_h (
   const float * __restrict__ hx,
   const float * __restrict__ hy)
 {
-  const int left_neighbor_id = cell_x == 0 ? nx - 1 : cell_x - 1;
+  const int left_neighbor_id = cell_x == 0 ? nx - 1 : cell_id - 1;
   const int bottom_neighbor_id = nx * (cell_y - 1) + cell_x;
 
   return (hy[cell_id] - hy[left_neighbor_id]) / dx
@@ -126,6 +126,7 @@ __device__ float calculate_source (float t, float frequency)
 
 __global__ void update_e_kernel (
   int nx,
+  int process_ny,
   int n_cells,
   int own_in_process_begin,
 
@@ -149,11 +150,63 @@ __global__ void update_e_kernel (
       const float chz = update_curl_h (nx, cell_id, cell_x, cell_y, dx, dy, hx, hy);
       dz[cell_id] += C0_p_dt * chz;
 
-      if (cell_id == (own_in_process_begin + cell_x - 1) / 2)
+      if (own_in_process_begin + cell_y == (process_ny * 3) / 4 && cell_x == nx / 2)
         dz[cell_id] += calculate_source (t, 1E+9);
 
       ez[cell_id] = dz[cell_id] / er[cell_id];
     }
+}
+
+void write_vtk (
+  const std::string &filename,
+  const float dx,
+  const float dy,
+  const unsigned int nx,
+  const unsigned int ny,
+  const float *e)
+{
+  FILE * f = fopen (filename.c_str (), "w");
+
+  fprintf (f, "# vtk DataFile Version 3.0\n");
+  fprintf (f, "vtk output\n");
+  fprintf (f, "ASCII\n");
+  fprintf (f, "DATASET UNSTRUCTURED_GRID\n");
+  fprintf (f, "POINTS %u double\n", nx * ny * 4);
+
+  for (unsigned int j = 0; j < ny; j++)
+    {
+      for (unsigned int i = 0; i < nx; i++)
+        {
+          fprintf (f, "%lf %lf 0.0\n", dx * (i + 0), dy * (j + 0) );
+          fprintf (f, "%lf %lf 0.0\n", dx * (i + 1), dy * (j + 0) );
+          fprintf (f, "%lf %lf 0.0\n", dx * (i + 1), dy * (j + 1) );
+          fprintf (f, "%lf %lf 0.0\n", dx * (i + 0), dy * (j + 1) );
+        }
+    }
+
+  fprintf (f, "CELLS %u %u\n", nx * ny, nx * ny * 5);
+
+  for (unsigned int j = 0; j < ny; j++)
+    {
+      for (unsigned int i = 0; i < nx; i++)
+        {
+          const unsigned int point_offset = (j * nx + i) * 4;
+          fprintf (f, "4 %u %u %u %u\n", point_offset + 0, point_offset + 1, point_offset + 2, point_offset + 3);
+        }
+    }
+
+  fprintf (f, "CELL_TYPES %u\n", nx * ny);
+  for (unsigned int i = 0; i < nx * ny; i++)
+    fprintf (f, "9\n");
+
+  fprintf (f, "CELL_DATA %u\n", nx * ny);
+  fprintf (f, "SCALARS Ez double 1\n");
+  fprintf (f, "LOOKUP_TABLE default\n");
+
+  for (unsigned int i = 0; i < nx * ny; i++)
+    fprintf (f, "%lf\n", e[i]);
+
+  fclose (f);
 }
 
 void run_fdtd (
@@ -196,6 +249,8 @@ void run_fdtd (
   const float dy = grid_info.get_dy ();
   const float C0_p_dt = C0 * dt;
 
+  float *cpu_e = grid_accessor.cpu_field;
+
   for (int step = 0; step < steps; step++)
     {
       update_h_kernel<<<blocks_count, threads_per_block>>> (
@@ -207,11 +262,29 @@ void run_fdtd (
       grid_accessor.sync_send (fdtd_fields::hy);
 
       update_e_kernel<<<blocks_count, threads_per_block>>> (
-        nx, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
+        nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
         C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
+      cudaDeviceSynchronize ();
+      thread_info.sync ();
 
       grid_accessor.sync_send (fdtd_fields::ez);
       thread_info.sync ();
+
+      if (step % 10 == 0)
+        {
+          /// Write results
+          cudaMemcpy (
+            cpu_e + nx * grid_info.get_row_begin_in_process (),
+            own_ez,
+            grid_info.get_own_cells_count () * sizeof (float),
+            cudaMemcpyDeviceToHost);
+
+          if (thread_info.thread_id == 0)
+            write_vtk ("out_" + std::to_string (step) + ".vtk", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
+          thread_info.sync ();
+        }
+
+      t += dt;
     }
 
   throw_on_error (cudaDeviceSynchronize (), __FILE__, __LINE__);

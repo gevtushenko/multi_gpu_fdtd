@@ -74,12 +74,12 @@ int main ()
 
   const float width = 10.0;
   const float height = 10.0;
-  const int grid_size = 1000;
-  const int steps_count = 100;
+  const int grid_size = 200;
+  const int steps_count = 1000;
   const int process_nx = grid_size;
   const int process_ny = grid_size;
 
-  for (int devices_count = 1; devices_count <= gpus_count; devices_count++)
+  for (int devices_count = 2; devices_count <= gpus_count; devices_count++)
     {
       std::cout << "\nStarting measurement for " << devices_count << std::endl;
 
@@ -87,7 +87,7 @@ int main ()
       threads.reserve (devices_count);
 
       barrier_class barrier (devices_count);
-      grid_barrier_class grid_barrier (devices_count);
+      grid_barrier_class grid_barrier (devices_count, process_nx, process_ny);
       for (int device_id = 0; device_id < devices_count; device_id++)
         {
           thread_info_class thread_info (device_id, devices_count, barrier);
