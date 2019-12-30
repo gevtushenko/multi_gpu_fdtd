@@ -4,6 +4,9 @@
 #include <iostream>
 #include <cuda_runtime.h>
 
+#include "barrier.h"
+#include "grid_info.h"
+
 void throw_on_error (cudaError_t code, const char *file, int line)
 {
   if (code != cudaSuccess)
@@ -13,6 +16,44 @@ void throw_on_error (cudaError_t code, const char *file, int line)
       std::string file_and_line;
       ss >> file_and_line;
       throw std::runtime_error (file_and_line);
+    }
+}
+
+void prepare_nvlink (const thread_info_class &thread_info)
+{
+  throw_on_error (cudaSetDevice (thread_info.thread_id), __FILE__, __LINE__);
+
+  bool nvlink_enabled = true;
+
+  for (int other_device_id = 0; other_device_id < thread_info.threads_count; other_device_id++)
+    {
+      if (other_device_id != thread_info.thread_id)
+        {
+          int can_access_other_device {};
+          throw_on_error (cudaDeviceCanAccessPeer (&can_access_other_device, thread_info.thread_id, other_device_id), __FILE__, __LINE__);
+
+          if (can_access_other_device)
+            {
+              throw_on_error (cudaDeviceEnablePeerAccess (other_device_id, 0), __FILE__, __LINE__);
+            }
+          else
+            {
+              std::cerr << "Warning in thread " << thread_info.thread_id << ": device " << thread_info.thread_id
+                        << " can't access device " << other_device_id << " memory!"
+                        << " Fall back to normal copy through the host." << std::endl;
+              nvlink_enabled = false;
+            }
+        }
+    }
+
+  for (int tid = 0; tid < thread_info.threads_count; tid++)
+    {
+      if (tid == thread_info.thread_id)
+        {
+          if (nvlink_enabled)
+            std::cout << "NVLINK enabled on thread " << thread_info.thread_id << "\n";
+        }
+      thread_info.sync ();
     }
 }
 
@@ -28,40 +69,16 @@ int main ()
       std::vector<std::thread> threads;
       threads.reserve (devices_count);
 
+      barrier_class barrier (devices_count);
       for (int device_id = 0; device_id < devices_count; device_id++)
         {
-          threads.emplace_back([device_id, devices_count] () {
+          thread_info_class thread_info (device_id, devices_count, barrier);
+          threads.emplace_back([thread_info] () {
             try {
-                throw_on_error (cudaSetDevice (device_id), __FILE__, __LINE__);
-
-                bool nvlink_enabled = true;
-
-                for (int other_device_id = 0; other_device_id < devices_count; other_device_id++)
-                  {
-                    if (other_device_id != device_id)
-                      {
-                        int can_access_other_device {};
-                        throw_on_error (cudaDeviceCanAccessPeer (&can_access_other_device, device_id, other_device_id), __FILE__, __LINE__);
-
-                        if (can_access_other_device)
-                          {
-                            throw_on_error (cudaDeviceEnablePeerAccess (other_device_id, 0), __FILE__, __LINE__);
-                          }
-                        else
-                          {
-                            std::cerr << "Warning in thread " << device_id << ": device " << device_id
-                                      << " can't access device " << other_device_id << " memory!"
-                                      << " Fall back to normal copy through the host." << std::endl;
-                            nvlink_enabled = false;
-                          }
-                      }
-                  }
-
-              if (nvlink_enabled)
-                std::cout << "NVLINK enabled on thread " << device_id << "\n";
+              prepare_nvlink (thread_info);
             }
             catch (std::runtime_error &error) {
-              std::cerr << "Error in thread " << device_id << ": " << error.what() << std::endl;
+              std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;
             }
           });
         }
