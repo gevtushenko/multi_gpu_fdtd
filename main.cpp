@@ -72,6 +72,8 @@ int main ()
   int gpus_count {};
   cudaGetDeviceCount (&gpus_count);
 
+  const float width = 10.0;
+  const float height = 10.0;
   const int grid_size = 10000;
   const int steps_count = 100;
   const int process_nx = grid_size;
@@ -89,16 +91,16 @@ int main ()
       for (int device_id = 0; device_id < devices_count; device_id++)
         {
           thread_info_class thread_info (device_id, devices_count, barrier);
-          threads.emplace_back([thread_info, process_nx, process_ny, steps_count, &grid_barrier] () {
+          threads.emplace_back([thread_info, process_nx, process_ny, steps_count, width, height, &grid_barrier] () {
             try {
               prepare_nvlink (thread_info);
 
-              grid_info_class grid_info (process_nx, process_ny, thread_info);
+              grid_info_class grid_info (width, height, process_nx, process_ny, thread_info);
               print_memory_info (grid_info, thread_info);
               grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
                 thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), static_cast<int> (fdtd_fields::fields_count));
 
-              run_fdtd (steps_count, grid_barrier_accessor, thread_info);
+              run_fdtd (steps_count, grid_info, grid_barrier_accessor, thread_info);
             }
             catch (std::runtime_error &error) {
               std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;

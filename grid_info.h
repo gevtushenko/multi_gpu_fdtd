@@ -20,14 +20,18 @@ public:
     int device_id_arg,
     int devices_count_arg,
     float **grid_arg,
-    int nx, int ny, int elements_per_cell)
+    int nx_arg, int ny_arg,
+    int elements_per_cell_arg)
     : own_device_id (device_id_arg)
     , devices_count (devices_count_arg)
+    , nx (nx_arg)
+    , ny (ny_arg)
     , push_top (push_top_arg)
     , push_bottom (push_bottom_arg)
     , grid (grid_arg)
+    , elements_per_cell (elements_per_cell_arg)
   {
-    throw_on_error (cudaMalloc (grid + own_device_id, nx * ny * elements_per_cell), __FILE__, __LINE__);
+    throw_on_error (cudaMalloc (grid + own_device_id, nx * ny * elements_per_cell * sizeof (float)), __FILE__, __LINE__);
 
     for (int iteration: {0, 1})
       {
@@ -51,6 +55,12 @@ public:
     }
   }
 
+  template <typename enum_type>
+  float *get_own_data (enum_type field_num)
+  {
+    return grid[own_device_id] + static_cast<int> (field_num) * (nx * ny) + nx; ///< Skip ghost cells
+  }
+
   cudaEvent_t *get_top_done (int iteration, int device_id)
   {
     return get_event (push_top, iteration, device_id);
@@ -70,9 +80,12 @@ private:
 private:
   int own_device_id {};
   int devices_count {};
+  int nx {};
+  int ny {};
   cudaEvent_t *push_top {};
   cudaEvent_t *push_bottom {};
   float **grid {};
+  const int elements_per_cell {};
 };
 
 class grid_barrier_class
@@ -111,8 +124,17 @@ class grid_info_class
 {
 public:
   grid_info_class () = delete;
-  grid_info_class (int process_nx, int process_ny, const thread_info_class &thread_info)
+  grid_info_class (
+    float width_arg,
+    float height_arg,
+    int process_nx,
+    int process_ny,
+    const thread_info_class &thread_info)
     : own_nx (process_nx)
+    , width (width_arg)
+    , height (height_arg)
+    , dx (width / static_cast<float> (process_nx))
+    , dy (height / static_cast<float> (process_ny))
   {
     const int chunk_size = process_ny / thread_info.threads_count;
     own_ny = thread_info.thread_id == thread_info.threads_count - 1
@@ -130,9 +152,20 @@ public:
   int get_nx () const { return nx; }
   int get_ny () const { return ny; }
 
+  float get_dx () const { return dx; }
+  float get_dy () const { return dy; }
+
+  int get_own_cells_count () const { return own_nx * own_ny; }
+
 private:
   int own_nx {};
   int own_ny {};
+
+  float width = 10.0;
+  float height = 10.0;
+
+  float dx {};
+  float dy {};
 
   int nx {};
   int ny {};

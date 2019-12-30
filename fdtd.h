@@ -13,6 +13,10 @@ enum class fdtd_fields : int
   er, hr, mh, hx, hy, ez, dz, fields_count
 };
 
-void run_fdtd (int steps, grid_barrier_accessor_class &grid_accessor, const thread_info_class &thread_info);
+void run_fdtd (
+  int steps,
+  const grid_info_class &grid_info,
+  grid_barrier_accessor_class &grid_accessor,
+  const thread_info_class &thread_info);
 
 #endif //MULTIGPUFDTD_FDTD_H
