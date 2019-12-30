@@ -18,12 +18,17 @@ public:
     cudaEvent_t *push_top_arg,
     cudaEvent_t *push_bottom_arg,
     int device_id_arg,
-    int devices_count_arg)
+    int devices_count_arg,
+    float **grid_arg,
+    int nx, int ny, int elements_per_cell)
     : own_device_id (device_id_arg)
     , devices_count (devices_count_arg)
     , push_top (push_top_arg)
     , push_bottom (push_bottom_arg)
+    , grid (grid_arg)
   {
+    throw_on_error (cudaMalloc (grid + own_device_id, nx * ny * elements_per_cell), __FILE__, __LINE__);
+
     for (int iteration: {0, 1})
       {
         throw_on_error (cudaEventCreateWithFlags (get_top_done (iteration, own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
@@ -34,6 +39,8 @@ public:
   ~grid_barrier_accessor_class ()
   {
     try {
+      throw_on_error (cudaFree (grid[own_device_id]), __FILE__, __LINE__);
+
       for (int iteration: {0, 1})
         {
           throw_on_error (cudaEventDestroy (*get_top_done (iteration, own_device_id)), __FILE__, __LINE__);
@@ -63,8 +70,9 @@ private:
 private:
   int own_device_id {};
   int devices_count {};
-  cudaEvent_t *push_top;
-  cudaEvent_t *push_bottom;
+  cudaEvent_t *push_top {};
+  cudaEvent_t *push_bottom {};
+  float **grid {};
 };
 
 class grid_barrier_class
@@ -74,16 +82,20 @@ public:
     : devices_count (devices_count_arg)
     , push_top_done (new cudaEvent_t[2 * devices_count])
     , push_bottom_done (new cudaEvent_t[2 * devices_count])
+    , grid (new float*[devices_count])
   {
   }
 
-  grid_barrier_accessor_class create_accessor (int device_id)
+  grid_barrier_accessor_class create_accessor (int device_id, int nx, int ny, int elements_per_cell)
   {
     return {
       push_top_done.get (),
       push_bottom_done.get (),
       device_id,
-      devices_count
+      devices_count,
+      grid.get (),
+      nx, ny,
+      elements_per_cell
     };
   }
 
@@ -91,15 +103,16 @@ private:
   int devices_count {};
   std::unique_ptr<cudaEvent_t[]> push_top_done;
   std::unique_ptr<cudaEvent_t[]> push_bottom_done;
+
+  std::unique_ptr<float*[]> grid;
 };
 
 class grid_info_class
 {
 public:
   grid_info_class () = delete;
-  grid_info_class (int process_nx, int process_ny, const thread_info_class &thread_info, grid_barrier_accessor_class &barrier_arg)
+  grid_info_class (int process_nx, int process_ny, const thread_info_class &thread_info)
     : own_nx (process_nx)
-    , barrier (barrier_arg)
   {
     const int chunk_size = process_ny / thread_info.threads_count;
     own_ny = thread_info.thread_id == thread_info.threads_count - 1
@@ -109,16 +122,23 @@ public:
     row_end_in_process = thread_info.thread_id < thread_info.threads_count - 1
                        ? chunk_size * (thread_info.thread_id + 1)
                        : process_ny;
+
+    nx = own_nx;
+    ny = own_ny + 2;
   }
+
+  int get_nx () const { return nx; }
+  int get_ny () const { return ny; }
 
 private:
   int own_nx {};
   int own_ny {};
 
+  int nx {};
+  int ny {};
+
   int row_begin_in_process {};
   int row_end_in_process {};
-
-  grid_barrier_accessor_class &barrier;
 };
 
 #endif //MULTIGPUFDTD_GRID_INFO_H

@@ -71,8 +71,9 @@ int main ()
             try {
               prepare_nvlink (thread_info);
 
-              grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (thread_info.thread_id);
-              grid_info_class grid_info (process_nx, process_ny, thread_info, grid_barrier_accessor);
+              grid_info_class grid_info (process_nx, process_ny, thread_info);
+              grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
+                thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), 1);
             }
             catch (std::runtime_error &error) {
               std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;
