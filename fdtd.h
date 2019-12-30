@@ -15,6 +15,8 @@ enum class fdtd_fields : int
 
 void run_fdtd (
   int steps,
+  int write_each,
+  double *elapsed_times,
   const grid_info_class &grid_info,
   grid_barrier_accessor_class &grid_accessor,
   const thread_info_class &thread_info);

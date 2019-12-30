@@ -1,5 +1,7 @@
 #include "fdtd.h"
 
+#include <chrono>
+
 constexpr float C0 = 299792458.0f; /// Speed of light [metres per second]
 
 float calculate_dt (float dx, float dy)
@@ -212,6 +214,8 @@ void write_vtk (
 
 void run_fdtd (
   int steps,
+  int write_each,
+  double *elapsed_times,
   const grid_info_class &grid_info,
   grid_barrier_accessor_class &grid_accessor,
   const thread_info_class &thread_info)
@@ -252,6 +256,7 @@ void run_fdtd (
 
   float *cpu_e = grid_accessor.cpu_field;
 
+  auto begin = std::chrono::system_clock::now ();
   for (int step = 0; step < steps; step++)
     {
       update_h_kernel<<<blocks_count, threads_per_block>>> (
@@ -272,7 +277,7 @@ void run_fdtd (
       grid_accessor.sync_send (fdtd_fields::ez);
       thread_info.sync ();
 
-      if (step % 30 == 0)
+      if (write_each > 0 && step % write_each == 0)
         {
           /// Write results
           cudaMemcpy (
@@ -291,6 +296,9 @@ void run_fdtd (
 
       t += dt;
     }
+  auto end = std::chrono::system_clock::now ();
+  const std::chrono::duration<double> duration = end - begin;
+  elapsed_times[thread_info.thread_id] = duration.count ();
 
   throw_on_error (cudaDeviceSynchronize (), __FILE__, __LINE__);
 }
