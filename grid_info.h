@@ -19,15 +19,15 @@ public:
     cudaEvent_t *push_bottom_arg,
     int device_id_arg,
     int devices_count_arg)
-    : device_id (device_id_arg)
+    : own_device_id (device_id_arg)
     , devices_count (devices_count_arg)
     , push_top (push_top_arg)
     , push_bottom (push_bottom_arg)
   {
     for (int iteration: {0, 1})
       {
-        throw_on_error (cudaEventCreateWithFlags (get_top_done (iteration, device_id), cudaEventDisableTiming), __FILE__, __LINE__);
-        throw_on_error (cudaEventCreateWithFlags (get_bottom_done (iteration, device_id), cudaEventDisableTiming), __FILE__, __LINE__);
+        throw_on_error (cudaEventCreateWithFlags (get_top_done (iteration, own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
+        throw_on_error (cudaEventCreateWithFlags (get_bottom_done (iteration, own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
       }
   }
 
@@ -36,8 +36,8 @@ public:
     try {
       for (int iteration: {0, 1})
         {
-          throw_on_error (cudaEventDestroy (*get_top_done (iteration, device_id)), __FILE__, __LINE__);
-          throw_on_error (cudaEventDestroy (*get_bottom_done (iteration, device_id)), __FILE__, __LINE__);
+          throw_on_error (cudaEventDestroy (*get_top_done (iteration, own_device_id)), __FILE__, __LINE__);
+          throw_on_error (cudaEventDestroy (*get_bottom_done (iteration, own_device_id)), __FILE__, __LINE__);
         }
     } catch (...) {
       std::cerr << "Error in barrier accessor destructor!" << std::endl;
@@ -61,7 +61,7 @@ private:
   }
 
 private:
-  int device_id {};
+  int own_device_id {};
   int devices_count {};
   cudaEvent_t *push_top;
   cudaEvent_t *push_bottom;
