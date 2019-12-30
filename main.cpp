@@ -74,7 +74,7 @@ int main ()
 
   const float width = 10.0;
   const float height = 10.0;
-  const int grid_size = 10000;
+  const int grid_size = 1000;
   const int steps_count = 100;
   const int process_nx = grid_size;
   const int process_ny = grid_size;

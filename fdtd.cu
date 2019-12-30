@@ -59,5 +59,16 @@ void run_fdtd (
   initialize_fields<<<blocks_count, threads_per_block>>> (
     n_own_cells, dt,
     own_er, own_hr, own_mh, own_hx, own_hy, own_ez, own_dz);
-  throw_on_error (cudaGetLastError (), __FILE__, __LINE__);
+
+  thread_info.sync (); ///< Wait for all threads to allocate their fields
+  grid_accessor.sync_send (fdtd_fields::er);
+  grid_accessor.sync_send (fdtd_fields::hr);
+  grid_accessor.sync_send (fdtd_fields::mh);
+  grid_accessor.sync_send (fdtd_fields::hx);
+  grid_accessor.sync_send (fdtd_fields::hy);
+  grid_accessor.sync_send (fdtd_fields::ez);
+  grid_accessor.sync_send (fdtd_fields::dz);
+  thread_info.sync ();
+
+  throw_on_error (cudaDeviceSynchronize (), __FILE__, __LINE__);
 }

@@ -55,10 +55,55 @@ public:
     }
   }
 
+  int get_neighbor_device_top ()
+  {
+    if (own_device_id == devices_count - 1)
+      return 0;
+    return own_device_id + 1;
+  }
+
+  int get_neighbor_device_bottom ()
+  {
+    if (own_device_id == 0)
+      return devices_count - 1;
+    return own_device_id - 1;
+  }
+
   template <typename enum_type>
   float *get_own_data (enum_type field_num)
   {
     return grid[own_device_id] + static_cast<int> (field_num) * (nx * ny) + nx; ///< Skip ghost cells
+  }
+
+  template <typename enum_type>
+  float *get_top_copy_dst (enum_type field_num)
+  {
+    return grid[get_neighbor_device_top ()] + static_cast<int> (field_num) * (nx * ny);
+  }
+
+  template <typename enum_type>
+  float *get_top_copy_src (enum_type field_num)
+  {
+    return get_own_data (field_num) - 2 * nx + (nx * ny);
+  }
+
+  template <typename enum_type>
+  float *get_bottom_copy_dst (enum_type field_num)
+  {
+    return grid[get_neighbor_device_bottom ()] + static_cast<int> (field_num) * (nx * ny) + (nx * ny) - nx;
+  }
+
+  template <typename enum_type>
+  float *get_bottom_copy_src (enum_type field_num)
+  {
+    return get_own_data (field_num);
+  }
+
+  template <typename enum_type>
+  void sync_send (enum_type field_num)
+  {
+    cudaMemcpy (get_top_copy_dst (field_num), get_top_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault);
+    throw_on_error (cudaMemcpy (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), nx * sizeof (float), cudaMemcpyDeviceToDevice), __FILE__, __LINE__);
   }
 
   cudaEvent_t *get_top_done (int iteration, int device_id)
