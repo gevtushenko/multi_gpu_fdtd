@@ -73,11 +73,11 @@ int main ()
   cudaGetDeviceCount (&gpus_count);
 
   const float width = 10.0;
-  const float height = 10.0;
+  const float height = 20.0;
   const int grid_size = 200;
   const int steps_count = 1000;
   const int process_nx = grid_size;
-  const int process_ny = grid_size;
+  const int process_ny = 2 * grid_size;
 
   for (int devices_count = 2; devices_count <= gpus_count; devices_count++)
     {

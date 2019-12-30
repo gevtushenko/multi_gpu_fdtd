@@ -86,7 +86,7 @@ public:
   template <typename enum_type>
   float *get_top_copy_src (enum_type field_num)
   {
-    return get_own_data (field_num) - 2 * nx + (nx * ny);
+    return get_own_data (field_num) - 3 * nx + (nx * ny);
   }
 
   template <typename enum_type>

@@ -150,7 +150,7 @@ __global__ void update_e_kernel (
       const float chz = update_curl_h (nx, cell_id, cell_x, cell_y, dx, dy, hx, hy);
       dz[cell_id] += C0_p_dt * chz;
 
-      if (own_in_process_begin + cell_y == (process_ny * 3) / 4 && cell_x == nx / 2)
+      if (own_in_process_begin + cell_y == (process_ny * 2) / 5 && cell_x == nx / 2)
         dz[cell_id] += calculate_source (t, 1E+9);
 
       ez[cell_id] = dz[cell_id] / er[cell_id];
@@ -260,6 +260,7 @@ void run_fdtd (
 
       grid_accessor.sync_send (fdtd_fields::hx);
       grid_accessor.sync_send (fdtd_fields::hy);
+      thread_info.sync ();
 
       update_e_kernel<<<blocks_count, threads_per_block>>> (
         nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
