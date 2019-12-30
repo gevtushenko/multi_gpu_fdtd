@@ -75,15 +75,15 @@ int main ()
 
   const float width = 10.0;
   const float height = 20.0;
-  const int write_each = -1;
-  const int grid_size = 2000;
+  const int write_each = 30;
+  const int grid_size = 500;
   const int steps_count = 1000;
   const int process_nx = grid_size;
   const int process_ny = 2 * grid_size;
 
   double single_gpu_time {};
 
-  for (int devices_count = 1; devices_count <= gpus_count; devices_count++)
+  for (int devices_count = 2; devices_count <= gpus_count; devices_count++)
     {
       std::cout << "\nStarting measurement for " << devices_count << std::endl;
 
@@ -108,6 +108,7 @@ int main ()
                 thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), static_cast<int> (fdtd_fields::fields_count));
 
               run_fdtd (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
+              // run_fdtd_copy_overlap (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
             }
             catch (std::runtime_error &error) {
               std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;

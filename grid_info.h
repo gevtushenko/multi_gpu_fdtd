@@ -6,6 +6,7 @@
 #define MULTIGPUFDTD_GRID_INFO_H
 
 #include <cuda_runtime.h>
+#include <vector>
 #include <memory>
 
 #include "gpu_utils.h"
@@ -34,24 +35,16 @@ public:
     , cpu_field (cpu_field_arg)
   {
     throw_on_error (cudaMalloc (grid + own_device_id, nx * ny * elements_per_cell * sizeof (float)), __FILE__, __LINE__);
-
-    for (int iteration: {0, 1})
-      {
-        throw_on_error (cudaEventCreateWithFlags (get_top_done (iteration, own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
-        throw_on_error (cudaEventCreateWithFlags (get_bottom_done (iteration, own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
-      }
+    throw_on_error (cudaEventCreateWithFlags (get_top_done (own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
+    throw_on_error (cudaEventCreateWithFlags (get_bottom_done (own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
   }
 
   ~grid_barrier_accessor_class ()
   {
     try {
       throw_on_error (cudaFree (grid[own_device_id]), __FILE__, __LINE__);
-
-      for (int iteration: {0, 1})
-        {
-          throw_on_error (cudaEventDestroy (*get_top_done (iteration, own_device_id)), __FILE__, __LINE__);
-          throw_on_error (cudaEventDestroy (*get_bottom_done (iteration, own_device_id)), __FILE__, __LINE__);
-        }
+      throw_on_error (cudaEventDestroy (*get_top_done (own_device_id)), __FILE__, __LINE__);
+      throw_on_error (cudaEventDestroy (*get_bottom_done (own_device_id)), __FILE__, __LINE__);
     } catch (...) {
       std::cerr << "Error in barrier accessor destructor!" << std::endl;
     }
@@ -104,24 +97,48 @@ public:
   template <typename enum_type>
   void sync_send (enum_type field_num)
   {
+    sync_send_top (field_num);
+    sync_send_bottom (field_num);
+  }
+
+  template <typename enum_type>
+  void sync_send_top (enum_type field_num)
+  {
     throw_on_error (cudaMemcpy (get_top_copy_dst (field_num), get_top_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault), __FILE__, __LINE__);
+  }
+
+  template <typename enum_type>
+  void sync_send_bottom (enum_type field_num)
+  {
     throw_on_error (cudaMemcpy (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), nx * sizeof (float), cudaMemcpyDeviceToDevice), __FILE__, __LINE__);
   }
 
-  cudaEvent_t *get_top_done (int iteration, int device_id)
+  template <typename enum_type>
+  void async_send (const std::vector<enum_type> &fields_num, cudaStream_t &stream_top, cudaStream_t &stream_bottom)
   {
-    return get_event (push_top, iteration, device_id);
+    for (auto &field_num: fields_num)
+      throw_on_error (cudaMemcpyAsync (get_top_copy_dst (field_num), get_top_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault, stream_top), __FILE__, __LINE__);
+    cudaEventRecord (*get_top_done (own_device_id), stream_top);
+
+    for (auto &field_num: fields_num)
+      throw_on_error (cudaMemcpyAsync (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault, stream_bottom), __FILE__, __LINE__);
+    cudaEventRecord (*get_bottom_done (own_device_id), stream_bottom);
   }
 
-  cudaEvent_t *get_bottom_done (int iteration, int device_id)
+  cudaEvent_t *get_top_done (int device_id)
   {
-    return get_event (push_bottom, iteration, device_id);
+    return get_event (push_top, device_id);
+  }
+
+  cudaEvent_t *get_bottom_done (int device_id)
+  {
+    return get_event (push_bottom, device_id);
   }
 
 private:
-  cudaEvent_t *get_event (cudaEvent_t *events, int iteration, int device_id)
+  cudaEvent_t *get_event (cudaEvent_t *events, int device_id)
   {
-    return events + devices_count * (iteration % 2) + device_id;
+    return events + device_id;
   }
 
 private:

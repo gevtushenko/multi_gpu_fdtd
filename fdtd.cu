@@ -1,4 +1,5 @@
 #include "fdtd.h"
+#include <vector>
 
 constexpr float C0 = 299792458.0f; /// Speed of light [metres per second]
 
@@ -49,8 +50,8 @@ __device__ float update_curl_ex (
   float dy,
   const float * ez)
 {
-  const int neighbor_id = nx * (cell_y + 1) + cell_x;
-  return (ez[neighbor_id] - ez[cell_id]) / dy;
+  const int top_neighbor_id = nx * (cell_y + 1) + cell_x;
+  return (ez[top_neighbor_id] - ez[cell_id]) / dy;
 }
 
 /**
@@ -264,18 +265,16 @@ void run_fdtd (
     {
       update_h_kernel<<<blocks_count, threads_per_block>>> (
         nx, n_own_cells, dx, dy, own_ez, own_mh, own_hx, own_hy);
-      thread_info.sync ();
 
-      grid_accessor.sync_send (fdtd_fields::hx);
-      grid_accessor.sync_send (fdtd_fields::hy);
+      grid_accessor.sync_send_top (fdtd_fields::hx);
+      grid_accessor.sync_send_top (fdtd_fields::hy);
       thread_info.sync ();
 
       update_e_kernel<<<blocks_count, threads_per_block>>> (
         nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
         C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
-      thread_info.sync ();
 
-      grid_accessor.sync_send (fdtd_fields::ez);
+      grid_accessor.sync_send_bottom (fdtd_fields::ez);
       thread_info.sync ();
 
       if (write_each > 0 && step % write_each == 0)
@@ -326,7 +325,9 @@ void run_fdtd_copy_overlap (
   constexpr unsigned int threads_per_block = 1024;
   const int n_own_cells = grid_info.get_own_cells_count ();
   const int nx = grid_info.get_nx ();
-  const unsigned int blocks_count = (n_own_cells + threads_per_block - 1) / threads_per_block;
+  const int blocks_count = (n_own_cells + threads_per_block - 1) / threads_per_block;
+  const int borders_blocks_count = (nx * 2 + threads_per_block - 1) / threads_per_block;
+  const int bulk_blocks_count = (n_own_cells - nx * 2 + threads_per_block - 1) / threads_per_block;
 
   float *own_er = grid_accessor.get_own_data (fdtd_fields::er);
   float *own_hr = grid_accessor.get_own_data (fdtd_fields::hr);
@@ -366,6 +367,11 @@ void run_fdtd_copy_overlap (
 
   float *cpu_e = grid_accessor.cpu_field;
 
+  const std::vector<fdtd_fields> fields_to_update_after_h = {
+    fdtd_fields::hx,
+    fdtd_fields::hy,
+  };
+
   cudaEvent_t start, stop;
   cudaEventCreate (&start);
   cudaEventCreate (&stop);
@@ -376,11 +382,9 @@ void run_fdtd_copy_overlap (
     {
       update_h_kernel<<<blocks_count, threads_per_block>>> (
         nx, n_own_cells, dx, dy, own_ez, own_mh, own_hx, own_hy);
-      thread_info.sync ();
+      grid_accessor.async_send (fields_to_update_after_h, push_top_stream, push_bottom_stream);
 
-      grid_accessor.sync_send (fdtd_fields::hx);
-      grid_accessor.sync_send (fdtd_fields::hy);
-      thread_info.sync ();
+
 
       update_e_kernel<<<blocks_count, threads_per_block>>> (
         nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
