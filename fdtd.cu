@@ -1,7 +1,5 @@
 #include "fdtd.h"
 
-#include <chrono>
-
 constexpr float C0 = 299792458.0f; /// Speed of light [metres per second]
 
 float calculate_dt (float dx, float dy)
@@ -256,7 +254,12 @@ void run_fdtd (
 
   float *cpu_e = grid_accessor.cpu_field;
 
-  auto begin = std::chrono::system_clock::now ();
+  cudaEvent_t start, stop;
+  cudaEventCreate (&start);
+  cudaEventCreate (&stop);
+
+  cudaEventRecord (start);
+
   for (int step = 0; step < steps; step++)
     {
       update_h_kernel<<<blocks_count, threads_per_block>>> (
@@ -296,9 +299,132 @@ void run_fdtd (
 
       t += dt;
     }
-  auto end = std::chrono::system_clock::now ();
-  const std::chrono::duration<double> duration = end - begin;
-  elapsed_times[thread_info.thread_id] = duration.count ();
+
+  float milliseconds = 0.0;
+  cudaEventRecord (stop);
+  cudaEventSynchronize (stop);
+  cudaEventElapsedTime (&milliseconds, start, stop);
+
+  cudaEventDestroy (stop);
+  cudaEventDestroy (start);
+
+  elapsed_times[thread_info.thread_id] = milliseconds / 1000.0f;
+
+  throw_on_error (cudaDeviceSynchronize (), __FILE__, __LINE__);
+}
+
+void run_fdtd_copy_overlap (
+  int steps,
+  int write_each,
+  double *elapsed_times,
+  const grid_info_class &grid_info,
+  grid_barrier_accessor_class &grid_accessor,
+  const thread_info_class &thread_info)
+{
+  const float dt = calculate_dt (grid_info.get_dx (), grid_info.get_dy ());
+
+  constexpr unsigned int threads_per_block = 1024;
+  const int n_own_cells = grid_info.get_own_cells_count ();
+  const int nx = grid_info.get_nx ();
+  const unsigned int blocks_count = (n_own_cells + threads_per_block - 1) / threads_per_block;
+
+  float *own_er = grid_accessor.get_own_data (fdtd_fields::er);
+  float *own_hr = grid_accessor.get_own_data (fdtd_fields::hr);
+  float *own_mh = grid_accessor.get_own_data (fdtd_fields::mh);
+  float *own_hx = grid_accessor.get_own_data (fdtd_fields::hx);
+  float *own_hy = grid_accessor.get_own_data (fdtd_fields::hy);
+  float *own_ez = grid_accessor.get_own_data (fdtd_fields::ez);
+  float *own_dz = grid_accessor.get_own_data (fdtd_fields::dz);
+
+  initialize_fields<<<blocks_count, threads_per_block>>> (
+    n_own_cells, dt,
+      own_er, own_hr, own_mh, own_hx, own_hy, own_ez, own_dz);
+
+  thread_info.sync (); ///< Wait for all threads to allocate their fields
+  grid_accessor.sync_send (fdtd_fields::er);
+  grid_accessor.sync_send (fdtd_fields::hr);
+  grid_accessor.sync_send (fdtd_fields::mh);
+  grid_accessor.sync_send (fdtd_fields::hx);
+  grid_accessor.sync_send (fdtd_fields::hy);
+  grid_accessor.sync_send (fdtd_fields::ez);
+  grid_accessor.sync_send (fdtd_fields::dz);
+  thread_info.sync ();
+
+  float t {};
+  const float dx = grid_info.get_dx ();
+  const float dy = grid_info.get_dy ();
+  const float C0_p_dt = C0 * dt;
+
+  int least_priority {};
+  int highest_priority {};
+  throw_on_error (cudaDeviceGetStreamPriorityRange (&least_priority, &highest_priority), __FILE__, __LINE__);
+
+  cudaStream_t compute_stream, push_top_stream, push_bottom_stream;
+  throw_on_error (cudaStreamCreateWithPriority (&compute_stream, cudaStreamDefault, least_priority), __FILE__, __LINE__);
+  throw_on_error (cudaStreamCreateWithPriority (&push_top_stream, cudaStreamDefault, highest_priority), __FILE__, __LINE__);
+  throw_on_error (cudaStreamCreateWithPriority (&push_bottom_stream, cudaStreamDefault, least_priority), __FILE__, __LINE__);
+
+  float *cpu_e = grid_accessor.cpu_field;
+
+  cudaEvent_t start, stop;
+  cudaEventCreate (&start);
+  cudaEventCreate (&stop);
+
+  cudaEventRecord (start);
+
+  for (int step = 0; step < steps; step++)
+    {
+      update_h_kernel<<<blocks_count, threads_per_block>>> (
+        nx, n_own_cells, dx, dy, own_ez, own_mh, own_hx, own_hy);
+      thread_info.sync ();
+
+      grid_accessor.sync_send (fdtd_fields::hx);
+      grid_accessor.sync_send (fdtd_fields::hy);
+      thread_info.sync ();
+
+      update_e_kernel<<<blocks_count, threads_per_block>>> (
+        nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
+          C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
+      thread_info.sync ();
+
+      grid_accessor.sync_send (fdtd_fields::ez);
+      thread_info.sync ();
+
+      if (write_each > 0 && step % write_each == 0)
+        {
+          /// Write results
+          cudaMemcpy (
+            cpu_e + nx * grid_info.get_row_begin_in_process (),
+            own_ez,
+            grid_info.get_own_cells_count () * sizeof (float),
+            cudaMemcpyDeviceToHost);
+
+          if (thread_info.thread_id == 0)
+            {
+              std::cout << "Writing results for step " << step;
+              std::cout.flush ();
+              write_vtk ("out_" + std::to_string (step) + ".vtk", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
+              std::cout << " completed" << std::endl;
+            }
+          thread_info.sync ();
+        }
+
+      t += dt;
+    }
+
+  float milliseconds = 0.0;
+  cudaEventRecord (stop);
+  cudaEventSynchronize (stop);
+  cudaEventElapsedTime (&milliseconds, start, stop);
+
+  cudaEventDestroy (stop);
+  cudaEventDestroy (start);
+
+  throw_on_error (cudaStreamDestroy (push_top_stream), __FILE__, __LINE__);
+  throw_on_error (cudaStreamDestroy (push_bottom_stream), __FILE__, __LINE__);
+  throw_on_error (cudaStreamDestroy (compute_stream), __FILE__, __LINE__);
+
+  elapsed_times[thread_info.thread_id] = milliseconds / 1000.0f;
 
   throw_on_error (cudaDeviceSynchronize (), __FILE__, __LINE__);
 }

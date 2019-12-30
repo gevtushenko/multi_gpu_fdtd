@@ -10,7 +10,7 @@ set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -lineinfo -gencode arch=compute_75,code=
 if (CMAKE_BUILD_TYPE MATCHES "Debug")
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -g")
 else()
-    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
+    set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3 --use_fast_math")
 endif()
 
 cuda_add_executable(MultiGPUFDTD main.cpp barrier.h grid_info.h gpu_utils.h fdtd.cu fdtd.h)

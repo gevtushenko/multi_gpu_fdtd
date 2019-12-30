@@ -21,4 +21,12 @@ void run_fdtd (
   grid_barrier_accessor_class &grid_accessor,
   const thread_info_class &thread_info);
 
+void run_fdtd_copy_overlap (
+  int steps,
+  int write_each,
+  double *elapsed_times,
+  const grid_info_class &grid_info,
+  grid_barrier_accessor_class &grid_accessor,
+  const thread_info_class &thread_info);
+
 #endif //MULTIGPUFDTD_FDTD_H
