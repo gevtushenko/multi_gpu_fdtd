@@ -60,12 +60,13 @@ __device__ float update_curl_ex (
 __device__ float update_curl_ey (
   int nx,
   int cell_x,
+  int cell_y,
   int cell_id,
   float dx,
   const float * ez)
 {
-  const int neighbor_id = cell_x == nx - 1 ? 0 : cell_id + 1;
-  return -(ez[neighbor_id] - ez[cell_id]) / dx;
+  const int right_neighbor_id = cell_x == nx - 1 ? cell_y * nx + 0 : cell_id + 1;
+  return -(ez[right_neighbor_id] - ez[cell_id]) / dx;
 }
 
 __global__ void update_h_kernel (
@@ -87,7 +88,7 @@ __global__ void update_h_kernel (
       const int cell_y = cell_id / nx;
 
       const float cex = update_curl_ex (nx, cell_x, cell_y, cell_id, dy, ez);
-      const float cey = update_curl_ey (nx, cell_x, cell_id, dx, ez);
+      const float cey = update_curl_ey (nx, cell_x, cell_y, cell_id, dx, ez);
 
       // update_h
       hx[cell_id] -= mh[cell_id] * cex;
@@ -105,7 +106,7 @@ __device__ static float update_curl_h (
   const float * __restrict__ hx,
   const float * __restrict__ hy)
 {
-  const int left_neighbor_id = cell_x == 0 ? nx - 1 : cell_id - 1;
+  const int left_neighbor_id = cell_x == 0 ? cell_y * nx + nx - 1 : cell_id - 1;
   const int bottom_neighbor_id = nx * (cell_y - 1) + cell_x;
 
   return (hy[cell_id] - hy[left_neighbor_id]) / dx
@@ -150,7 +151,7 @@ __global__ void update_e_kernel (
       const float chz = update_curl_h (nx, cell_id, cell_x, cell_y, dx, dy, hx, hy);
       dz[cell_id] += C0_p_dt * chz;
 
-      if (own_in_process_begin + cell_y == (process_ny * 2) / 5 && cell_x == nx / 2)
+      if (own_in_process_begin + cell_y == (process_ny * 2) / 5 && cell_x == nx / 4)
         dz[cell_id] += calculate_source (t, 1E+9);
 
       ez[cell_id] = dz[cell_id] / er[cell_id];
