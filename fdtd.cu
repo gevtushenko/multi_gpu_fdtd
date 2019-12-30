@@ -272,7 +272,7 @@ void run_fdtd (
       grid_accessor.sync_send (fdtd_fields::ez);
       thread_info.sync ();
 
-      if (step % 10 == 0)
+      if (step % 30 == 0)
         {
           /// Write results
           cudaMemcpy (
@@ -282,7 +282,10 @@ void run_fdtd (
             cudaMemcpyDeviceToHost);
 
           if (thread_info.thread_id == 0)
-            write_vtk ("out_" + std::to_string (step) + ".vtk", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
+            {
+              std::cout << "Writing results for step " << step << std::endl;
+              write_vtk ("out_" + std::to_string (step) + ".vtk", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
+            }
           thread_info.sync ();
         }
 
