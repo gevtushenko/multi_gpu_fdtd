@@ -261,7 +261,6 @@ void run_fdtd (
     {
       update_h_kernel<<<blocks_count, threads_per_block>>> (
         nx, n_own_cells, dx, dy, own_ez, own_mh, own_hx, own_hy);
-      cudaDeviceSynchronize ();
       thread_info.sync ();
 
       grid_accessor.sync_send (fdtd_fields::hx);
@@ -271,7 +270,6 @@ void run_fdtd (
       update_e_kernel<<<blocks_count, threads_per_block>>> (
         nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
         C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
-      cudaDeviceSynchronize ();
       thread_info.sync ();
 
       grid_accessor.sync_send (fdtd_fields::ez);
@@ -288,8 +286,10 @@ void run_fdtd (
 
           if (thread_info.thread_id == 0)
             {
-              std::cout << "Writing results for step " << step << std::endl;
+              std::cout << "Writing results for step " << step;
+              std::cout.flush ();
               write_vtk ("out_" + std::to_string (step) + ".vtk", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
+              std::cout << " completed" << std::endl;
             }
           thread_info.sync ();
         }

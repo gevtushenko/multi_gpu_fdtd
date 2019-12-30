@@ -75,7 +75,7 @@ int main ()
 
   const float width = 10.0;
   const float height = 20.0;
-  const int write_each = -1;
+  const int write_each = 30;
   const int grid_size = 1000;
   const int steps_count = 1000;
   const int process_nx = grid_size;
@@ -83,7 +83,7 @@ int main ()
 
   double single_gpu_time {};
 
-  for (int devices_count = 1; devices_count <= gpus_count; devices_count++)
+  for (int devices_count = 2; devices_count <= gpus_count; devices_count++)
     {
       std::cout << "\nStarting measurement for " << devices_count << std::endl;
 
