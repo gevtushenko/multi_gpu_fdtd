@@ -4,6 +4,7 @@
 #include <iostream>
 #include <cuda_runtime.h>
 
+#include "fdtd.h"
 #include "barrier.h"
 #include "grid_info.h"
 #include "gpu_utils.h"
@@ -40,7 +41,27 @@ void prepare_nvlink (const thread_info_class &thread_info)
       if (tid == thread_info.thread_id)
         {
           if (nvlink_enabled)
-            std::cout << "NVLINK enabled on thread " << thread_info.thread_id << "\n";
+            std::cout << "NVLINK enabled on thread " << thread_info.thread_id << std::endl;
+        }
+      thread_info.sync ();
+    }
+}
+
+template<typename T>
+double elements_to_gb (size_t elements_count)
+{
+  return static_cast<double> (elements_count) * sizeof (T) / 1024 / 1024 / 1024;
+}
+
+void print_memory_info (const grid_info_class &grid_info, const thread_info_class &thread_info)
+{
+  for (int tid = 0; tid < thread_info.threads_count; tid++)
+    {
+      if (tid == thread_info.thread_id)
+        {
+          const size_t elements_to_allocate = grid_info.get_ny () * grid_info.get_nx () * static_cast<int> (fdtd_fields::fields_count);
+          std::cout << "Allocating " << elements_to_gb<float> (elements_to_allocate) << " GB "
+                    << "on GPU " << thread_info.thread_id << std::endl;
         }
       thread_info.sync ();
     }
@@ -52,6 +73,7 @@ int main ()
   cudaGetDeviceCount (&gpus_count);
 
   const int grid_size = 10000;
+  const int steps_count = 100;
   const int process_nx = grid_size;
   const int process_ny = grid_size;
 
@@ -67,13 +89,16 @@ int main ()
       for (int device_id = 0; device_id < devices_count; device_id++)
         {
           thread_info_class thread_info (device_id, devices_count, barrier);
-          threads.emplace_back([thread_info, process_nx, process_ny, &grid_barrier] () {
+          threads.emplace_back([thread_info, process_nx, process_ny, steps_count, &grid_barrier] () {
             try {
               prepare_nvlink (thread_info);
 
               grid_info_class grid_info (process_nx, process_ny, thread_info);
+              print_memory_info (grid_info, thread_info);
               grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
-                thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), 1);
+                thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), static_cast<int> (fdtd_fields::fields_count));
+
+              run_fdtd (steps_count, grid_barrier_accessor, thread_info);
             }
             catch (std::runtime_error &error) {
               std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;

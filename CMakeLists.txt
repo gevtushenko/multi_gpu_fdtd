@@ -13,5 +13,5 @@ else()
     set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -O3")
 endif()
 
-cuda_add_executable(MultiGPUFDTD main.cpp barrier.h grid_info.h gpu_utils.h)
+cuda_add_executable(MultiGPUFDTD main.cpp barrier.h grid_info.h gpu_utils.h fdtd.cu fdtd.h)
 target_include_directories(MultiGPUFDTD PRIVATE ${CUDA_INCLUDE_DIRS})
