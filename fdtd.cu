@@ -447,7 +447,7 @@ void run_fdtd_copy_overlap (
     n_own_cells, dt,
       own_er, own_hr, own_mh, own_hx, own_hy, own_ez, own_dz);
 
-  thread_info.sync (); ///< Wait for all threads to allocate their fields
+  thread_info.sync (); ///< Wait for other threads to complete allocation
   grid_accessor.sync_send (fdtd_fields::er);
   grid_accessor.sync_send (fdtd_fields::hr);
   grid_accessor.sync_send (fdtd_fields::mh);
@@ -471,9 +471,6 @@ void run_fdtd_copy_overlap (
   throw_on_error (cudaStreamCreateWithPriority (&push_top_stream, cudaStreamDefault, highest_priority), __FILE__, __LINE__);
   throw_on_error (cudaStreamCreateWithPriority (&push_bottom_stream, cudaStreamDefault, least_priority), __FILE__, __LINE__);
 
-  cudaEvent_t new_step_event;
-  throw_on_error (cudaEventCreateWithFlags (&new_step_event, cudaEventDisableTiming), __FILE__, __LINE__);
-
   float *cpu_e = grid_accessor.cpu_field;
 
   const std::vector<fdtd_fields> fields_to_update_after_h = {
@@ -494,24 +491,31 @@ void run_fdtd_copy_overlap (
   for (int step = 0; step < steps; step++)
     {
       thread_info.sync ();
-      cudaEventRecord (new_step_event, compute_stream);
 
       /// Compute bulk
       cudaStreamWaitEvent (compute_stream, *grid_accessor.get_bottom_done (grid_accessor.get_neighbor_device_top ()), 0);
       update_h_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
+      cudaEventRecord (*grid_accessor.get_compute_h_done (thread_info.thread_id), compute_stream);
 
       /// Compute boundaries
-      cudaStreamWaitEvent (push_top_stream, new_step_event, 0);
+      cudaStreamWaitEvent (push_top_stream, *grid_accessor.get_compute_e_done (thread_info.thread_id), 0);
+      cudaStreamWaitEvent (push_top_stream, *grid_accessor.get_compute_e_done (grid_accessor.get_neighbor_device_top ()), 0);
       update_h_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_top_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
       grid_accessor.async_send_top (fields_to_update_after_h, push_top_stream);
 
+      /// Compute bulk
       cudaStreamWaitEvent (compute_stream, *grid_accessor.get_top_done (grid_accessor.get_neighbor_device_bottom ()), 0);
       update_e_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (
         nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
+      cudaEventRecord (*grid_accessor.get_compute_e_done (thread_info.thread_id), compute_stream);
 
+      /// Compute boundaries
       cudaStreamWaitEvent (push_bottom_stream, *grid_accessor.get_top_done (grid_accessor.get_neighbor_device_bottom ()), 0);
-      update_e_border_kernel<<<bulk_blocks_count, threads_per_block, 0, push_bottom_stream>>> (
+
+      cudaStreamWaitEvent (push_bottom_stream, *grid_accessor.get_compute_h_done (thread_info.thread_id), 0);
+      cudaStreamWaitEvent (push_bottom_stream, *grid_accessor.get_compute_h_done (grid_accessor.get_neighbor_device_bottom ()), 0);
+      update_e_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_bottom_stream>>> (
         nx, grid_info.process_ny, grid_info.get_row_begin_in_process(), t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
       grid_accessor.async_send_bottom (fields_to_update_after_e, push_bottom_stream);
@@ -547,8 +551,6 @@ void run_fdtd_copy_overlap (
   cudaEventDestroy (stop);
   cudaEventDestroy (start);
 
-  cudaEventDestroy (new_step_event);
-
   throw_on_error (cudaStreamDestroy (push_top_stream), __FILE__, __LINE__);
   throw_on_error (cudaStreamDestroy (push_bottom_stream), __FILE__, __LINE__);
   throw_on_error (cudaStreamDestroy (compute_stream), __FILE__, __LINE__);
@@ -556,4 +558,5 @@ void run_fdtd_copy_overlap (
   elapsed_times[thread_info.thread_id] = milliseconds / 1000.0f;
 
   throw_on_error (cudaDeviceSynchronize (), __FILE__, __LINE__);
+  thread_info.sync ();
 }

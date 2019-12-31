@@ -18,6 +18,8 @@ public:
   grid_barrier_accessor_class (
     cudaEvent_t *push_top_arg,
     cudaEvent_t *push_bottom_arg,
+    cudaEvent_t *compute_h_arg,
+    cudaEvent_t *compute_e_arg,
     int device_id_arg,
     int devices_count_arg,
     float **grid_arg,
@@ -30,13 +32,17 @@ public:
     , ny (ny_arg)
     , push_top (push_top_arg)
     , push_bottom (push_bottom_arg)
+    , compute_h (compute_h_arg)
+    , compute_e (compute_e_arg)
     , grid (grid_arg)
     , elements_per_cell (elements_per_cell_arg)
     , cpu_field (cpu_field_arg)
   {
-    throw_on_error (cudaMalloc (grid + own_device_id, nx * ny * elements_per_cell * sizeof (float)), __FILE__, __LINE__);
+    throw_on_error (cudaMalloc (&grid[own_device_id], nx * ny * elements_per_cell * sizeof (float)), __FILE__, __LINE__);
     throw_on_error (cudaEventCreateWithFlags (get_top_done (own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
     throw_on_error (cudaEventCreateWithFlags (get_bottom_done (own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
+    throw_on_error (cudaEventCreateWithFlags (get_compute_h_done (own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
+    throw_on_error (cudaEventCreateWithFlags (get_compute_e_done (own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
   }
 
   ~grid_barrier_accessor_class ()
@@ -45,6 +51,8 @@ public:
       throw_on_error (cudaFree (grid[own_device_id]), __FILE__, __LINE__);
       throw_on_error (cudaEventDestroy (*get_top_done (own_device_id)), __FILE__, __LINE__);
       throw_on_error (cudaEventDestroy (*get_bottom_done (own_device_id)), __FILE__, __LINE__);
+      throw_on_error (cudaEventDestroy (*get_compute_h_done (own_device_id)), __FILE__, __LINE__);
+      throw_on_error (cudaEventDestroy (*get_compute_e_done (own_device_id)), __FILE__, __LINE__);
     } catch (...) {
       std::cerr << "Error in barrier accessor destructor!" << std::endl;
     }
@@ -139,6 +147,16 @@ public:
     return get_event (push_bottom, device_id);
   }
 
+  cudaEvent_t *get_compute_h_done (int device_id)
+  {
+    return get_event (compute_h, device_id);
+  }
+
+  cudaEvent_t *get_compute_e_done (int device_id)
+  {
+    return get_event (compute_e, device_id);
+  }
+
 private:
   cudaEvent_t *get_event (cudaEvent_t *events, int device_id)
   {
@@ -152,6 +170,8 @@ private:
   int ny {};
   cudaEvent_t *push_top {};
   cudaEvent_t *push_bottom {};
+  cudaEvent_t *compute_h {};
+  cudaEvent_t *compute_e {};
   float **grid {};
   const int elements_per_cell {};
 
@@ -164,8 +184,10 @@ class grid_barrier_class
 public:
   explicit grid_barrier_class (int devices_count_arg, int process_nx, int process_ny)
     : devices_count (devices_count_arg)
-    , push_top_done (new cudaEvent_t[2 * devices_count])
-    , push_bottom_done (new cudaEvent_t[2 * devices_count])
+    , push_top_done (new cudaEvent_t[devices_count])
+    , push_bottom_done (new cudaEvent_t[devices_count])
+    , compute_h (new cudaEvent_t[devices_count])
+    , compute_e (new cudaEvent_t[devices_count])
     , grid (new float*[devices_count])
   {
     throw_on_error (cudaMallocHost (&cpu_field, process_nx * process_ny * sizeof (float)), __FILE__, __LINE__);
@@ -181,6 +203,8 @@ public:
     return {
       push_top_done.get (),
       push_bottom_done.get (),
+      compute_h.get (),
+      compute_e.get (),
       device_id,
       devices_count,
       grid.get (),
@@ -194,6 +218,8 @@ private:
   int devices_count {};
   std::unique_ptr<cudaEvent_t[]> push_top_done;
   std::unique_ptr<cudaEvent_t[]> push_bottom_done;
+  std::unique_ptr<cudaEvent_t[]> compute_h;
+  std::unique_ptr<cudaEvent_t[]> compute_e;
 
   std::unique_ptr<float*[]> grid;
   float *cpu_field {};
