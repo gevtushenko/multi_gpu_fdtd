@@ -70,6 +70,28 @@ __device__ float update_curl_ey (
   return -(ez[right_neighbor_id] - ez[cell_id]) / dx;
 }
 
+__device__ void update_h (
+  int nx,
+  int cell_id,
+
+  float dx,
+  float dy,
+  const float * __restrict__ ez,
+  const float * __restrict__ mh,
+  float * __restrict__ hx,
+  float * __restrict__ hy)
+{
+  const int cell_x = cell_id % nx;
+  const int cell_y = cell_id / nx;
+
+  const float cex = update_curl_ex (nx, cell_x, cell_y, cell_id, dy, ez);
+  const float cey = update_curl_ey (nx, cell_x, cell_y, cell_id, dx, ez);
+
+  // update_h
+  hx[cell_id] -= mh[cell_id] * cex;
+  hy[cell_id] -= mh[cell_id] * cey;
+}
+
 __global__ void update_h_kernel (
     int nx,
     int n_cells,
@@ -81,20 +103,44 @@ __global__ void update_h_kernel (
     float * __restrict__ hx,
     float * __restrict__ hy)
 {
-  const unsigned int cell_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int cell_id = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (cell_id < n_cells)
-    {
-      const int cell_x = cell_id % nx;
-      const int cell_y = cell_id / nx;
+    update_h (nx, cell_id, dx, dy, ez, mh, hx, hy);
+}
 
-      const float cex = update_curl_ex (nx, cell_x, cell_y, cell_id, dy, ez);
-      const float cey = update_curl_ey (nx, cell_x, cell_y, cell_id, dx, ez);
+__global__ void update_h_border_kernel (
+  int nx,
+  int n_own_y,
 
-      // update_h
-      hx[cell_id] -= mh[cell_id] * cex;
-      hy[cell_id] -= mh[cell_id] * cey;
-    }
+  float dx,
+  float dy,
+  const float * __restrict__ ez,
+  const float * __restrict__ mh,
+  float * __restrict__ hx,
+  float * __restrict__ hy)
+{
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (tid < nx)
+    update_h (nx, nx * (n_own_y - 1) + tid, dx, dy, ez, mh, hx, hy);
+}
+
+__global__ void update_h_bulk_kernel (
+  int nx,
+  int n_own_y,
+
+  float dx,
+  float dy,
+  const float * __restrict__ ez,
+  const float * __restrict__ mh,
+  float * __restrict__ hx,
+  float * __restrict__ hy)
+{
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (tid < nx * (n_own_y - 1))
+    update_h (nx, tid, dx, dy, ez, mh, hx, hy);
 }
 
 __device__ static float update_curl_h (
@@ -126,6 +172,34 @@ __device__ float calculate_source (float t, float frequency)
   return gaussian_pulse (t, t_0, tau);
 }
 
+__device__ void update_e (
+  int nx,
+  int cell_id,
+  int process_ny,
+  int own_in_process_begin,
+
+  float t,
+  float dx,
+  float dy,
+  float C0_p_dt,
+  float * __restrict__ ez,
+  float * __restrict__ dz,
+  const float * __restrict__ er,
+  const float * __restrict__ hx,
+  const float * __restrict__ hy)
+{
+  const int cell_x = cell_id % nx;
+  const int cell_y = cell_id / nx;
+
+  const float chz = update_curl_h (nx, cell_id, cell_x, cell_y, dx, dy, hx, hy);
+  dz[cell_id] += C0_p_dt * chz;
+
+  if (own_in_process_begin + cell_y == (process_ny * 2) / 5 && cell_x == nx / 4)
+    dz[cell_id] += calculate_source (t, 1E+9);
+
+  ez[cell_id] = dz[cell_id] / er[cell_id];
+}
+
 __global__ void update_e_kernel (
   int nx,
   int process_ny,
@@ -145,18 +219,50 @@ __global__ void update_e_kernel (
   const unsigned int cell_id = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (cell_id < n_cells)
-    {
-      const int cell_x = cell_id % nx;
-      const int cell_y = cell_id / nx;
+    update_e (nx, cell_id, process_ny, own_in_process_begin, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
+}
 
-      const float chz = update_curl_h (nx, cell_id, cell_x, cell_y, dx, dy, hx, hy);
-      dz[cell_id] += C0_p_dt * chz;
+__global__ void update_e_bulk_kernel (
+  int nx,
+  int process_ny,
+  int n_cells,
+  int own_in_process_begin,
 
-      if (own_in_process_begin + cell_y == (process_ny * 2) / 5 && cell_x == nx / 4)
-        dz[cell_id] += calculate_source (t, 1E+9);
+  float t,
+  float dx,
+  float dy,
+  float C0_p_dt,
+  float * __restrict__ ez,
+  float * __restrict__ dz,
+  const float * __restrict__ er,
+  const float * __restrict__ hx,
+  const float * __restrict__ hy)
+{
+  const unsigned int cell_id = nx + blockIdx.x * blockDim.x + threadIdx.x;
 
-      ez[cell_id] = dz[cell_id] / er[cell_id];
-    }
+  if (cell_id < n_cells)
+    update_e (nx, cell_id, process_ny, own_in_process_begin, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
+}
+
+__global__ void update_e_border_kernel (
+  int nx,
+  int process_ny,
+  int own_in_process_begin,
+
+  float t,
+  float dx,
+  float dy,
+  float C0_p_dt,
+  float * __restrict__ ez,
+  float * __restrict__ dz,
+  const float * __restrict__ er,
+  const float * __restrict__ hx,
+  const float * __restrict__ hy)
+{
+  const unsigned int cell_id = blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (cell_id < nx)
+    update_e (nx, cell_id, process_ny, own_in_process_begin, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
 }
 
 void write_vtk (
@@ -326,8 +432,8 @@ void run_fdtd_copy_overlap (
   const int n_own_cells = grid_info.get_own_cells_count ();
   const int nx = grid_info.get_nx ();
   const int blocks_count = (n_own_cells + threads_per_block - 1) / threads_per_block;
-  const int borders_blocks_count = (nx * 2 + threads_per_block - 1) / threads_per_block;
-  const int bulk_blocks_count = (n_own_cells - nx * 2 + threads_per_block - 1) / threads_per_block;
+  const int borders_blocks_count = (nx + threads_per_block - 1) / threads_per_block;
+  const int bulk_blocks_count = (n_own_cells - nx + threads_per_block - 1) / threads_per_block;
 
   float *own_er = grid_accessor.get_own_data (fdtd_fields::er);
   float *own_hr = grid_accessor.get_own_data (fdtd_fields::hr);
@@ -365,11 +471,18 @@ void run_fdtd_copy_overlap (
   throw_on_error (cudaStreamCreateWithPriority (&push_top_stream, cudaStreamDefault, highest_priority), __FILE__, __LINE__);
   throw_on_error (cudaStreamCreateWithPriority (&push_bottom_stream, cudaStreamDefault, least_priority), __FILE__, __LINE__);
 
+  cudaEvent_t new_step_event;
+  throw_on_error (cudaEventCreateWithFlags (&new_step_event, cudaEventDisableTiming), __FILE__, __LINE__);
+
   float *cpu_e = grid_accessor.cpu_field;
 
   const std::vector<fdtd_fields> fields_to_update_after_h = {
     fdtd_fields::hx,
     fdtd_fields::hy,
+  };
+
+  const std::vector<fdtd_fields> fields_to_update_after_e = {
+    fdtd_fields::ez,
   };
 
   cudaEvent_t start, stop;
@@ -380,19 +493,28 @@ void run_fdtd_copy_overlap (
 
   for (int step = 0; step < steps; step++)
     {
-      update_h_kernel<<<blocks_count, threads_per_block>>> (
-        nx, n_own_cells, dx, dy, own_ez, own_mh, own_hx, own_hy);
-      grid_accessor.async_send (fields_to_update_after_h, push_top_stream, push_bottom_stream);
+      thread_info.sync ();
+      cudaEventRecord (new_step_event, compute_stream);
 
+      /// Compute bulk
+      cudaStreamWaitEvent (compute_stream, *grid_accessor.get_bottom_done (grid_accessor.get_neighbor_device_top ()), 0);
+      update_h_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
 
+      /// Compute boundaries
+      cudaStreamWaitEvent (push_top_stream, new_step_event, 0);
+      update_h_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_top_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
+      grid_accessor.async_send_top (fields_to_update_after_h, push_top_stream);
 
-      update_e_kernel<<<blocks_count, threads_per_block>>> (
+      cudaStreamWaitEvent (compute_stream, *grid_accessor.get_top_done (grid_accessor.get_neighbor_device_bottom ()), 0);
+      update_e_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (
         nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
-      thread_info.sync ();
 
-      grid_accessor.sync_send (fdtd_fields::ez);
-      thread_info.sync ();
+      cudaStreamWaitEvent (push_bottom_stream, *grid_accessor.get_top_done (grid_accessor.get_neighbor_device_bottom ()), 0);
+      update_e_border_kernel<<<bulk_blocks_count, threads_per_block, 0, push_bottom_stream>>> (
+        nx, grid_info.process_ny, grid_info.get_row_begin_in_process(), t, dx, dy,
+          C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
+      grid_accessor.async_send_bottom (fields_to_update_after_e, push_bottom_stream);
 
       if (write_each > 0 && step % write_each == 0)
         {
@@ -403,6 +525,7 @@ void run_fdtd_copy_overlap (
             grid_info.get_own_cells_count () * sizeof (float),
             cudaMemcpyDeviceToHost);
 
+          thread_info.sync ();
           if (thread_info.thread_id == 0)
             {
               std::cout << "Writing results for step " << step;
@@ -423,6 +546,8 @@ void run_fdtd_copy_overlap (
 
   cudaEventDestroy (stop);
   cudaEventDestroy (start);
+
+  cudaEventDestroy (new_step_event);
 
   throw_on_error (cudaStreamDestroy (push_top_stream), __FILE__, __LINE__);
   throw_on_error (cudaStreamDestroy (push_bottom_stream), __FILE__, __LINE__);

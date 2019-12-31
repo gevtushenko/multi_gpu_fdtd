@@ -114,12 +114,16 @@ public:
   }
 
   template <typename enum_type>
-  void async_send (const std::vector<enum_type> &fields_num, cudaStream_t &stream_top, cudaStream_t &stream_bottom)
+  void async_send_top (const std::vector<enum_type> &fields_num, cudaStream_t &stream_top)
   {
     for (auto &field_num: fields_num)
       throw_on_error (cudaMemcpyAsync (get_top_copy_dst (field_num), get_top_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault, stream_top), __FILE__, __LINE__);
     cudaEventRecord (*get_top_done (own_device_id), stream_top);
+  }
 
+  template <typename enum_type>
+  void async_send_bottom (const std::vector<enum_type> &fields_num, cudaStream_t &stream_bottom)
+  {
     for (auto &field_num: fields_num)
       throw_on_error (cudaMemcpyAsync (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault, stream_bottom), __FILE__, __LINE__);
     cudaEventRecord (*get_bottom_done (own_device_id), stream_bottom);
@@ -228,6 +232,8 @@ public:
 
   int get_nx () const { return nx; }
   int get_ny () const { return ny; }
+
+  int get_n_own_y () const { return own_ny; }
 
   float get_dx () const { return dx; }
   float get_dy () const { return dy; }

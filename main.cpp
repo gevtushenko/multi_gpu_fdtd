@@ -107,8 +107,8 @@ int main ()
               grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
                 thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), static_cast<int> (fdtd_fields::fields_count));
 
-              run_fdtd (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
-              // run_fdtd_copy_overlap (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
+              // run_fdtd (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
+              run_fdtd_copy_overlap (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
             }
             catch (std::runtime_error &error) {
               std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;
