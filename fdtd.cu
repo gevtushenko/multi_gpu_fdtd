@@ -490,35 +490,31 @@ void run_fdtd_copy_overlap (
 
   for (int step = 0; step < steps; step++)
     {
-      thread_info.sync ();
-
       /// Compute bulk
-      cudaStreamWaitEvent (compute_stream, *grid_accessor.get_bottom_done (grid_accessor.get_neighbor_device_top ()), 0);
       update_h_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
-      cudaEventRecord (*grid_accessor.get_compute_h_done (thread_info.thread_id), compute_stream);
 
       /// Compute boundaries
-      cudaStreamWaitEvent (push_top_stream, *grid_accessor.get_compute_e_done (thread_info.thread_id), 0);
-      cudaStreamWaitEvent (push_top_stream, *grid_accessor.get_compute_e_done (grid_accessor.get_neighbor_device_top ()), 0);
       update_h_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_top_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
       grid_accessor.async_send_top (fields_to_update_after_h, push_top_stream);
 
+      cudaStreamSynchronize (push_top_stream);
+      cudaStreamSynchronize (compute_stream);
+      thread_info.sync ();
+
       /// Compute bulk
-      cudaStreamWaitEvent (compute_stream, *grid_accessor.get_top_done (grid_accessor.get_neighbor_device_bottom ()), 0);
       update_e_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (
         nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
-      cudaEventRecord (*grid_accessor.get_compute_e_done (thread_info.thread_id), compute_stream);
 
       /// Compute boundaries
-      cudaStreamWaitEvent (push_bottom_stream, *grid_accessor.get_top_done (grid_accessor.get_neighbor_device_bottom ()), 0);
-
-      cudaStreamWaitEvent (push_bottom_stream, *grid_accessor.get_compute_h_done (thread_info.thread_id), 0);
-      cudaStreamWaitEvent (push_bottom_stream, *grid_accessor.get_compute_h_done (grid_accessor.get_neighbor_device_bottom ()), 0);
       update_e_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_bottom_stream>>> (
         nx, grid_info.process_ny, grid_info.get_row_begin_in_process(), t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
       grid_accessor.async_send_bottom (fields_to_update_after_e, push_bottom_stream);
+
+      cudaStreamSynchronize (push_bottom_stream);
+      cudaStreamSynchronize (compute_stream);
+      thread_info.sync ();
 
       if (write_each > 0 && step % write_each == 0)
         {
