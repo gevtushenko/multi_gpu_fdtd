@@ -265,6 +265,8 @@ __global__ void update_e_border_kernel (
     update_e (nx, cell_id, process_ny, own_in_process_begin, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
 }
 
+#include "vtk_writer.h"
+
 void write_vtk (
   const std::string &filename,
   const float dx,
@@ -530,7 +532,8 @@ void run_fdtd_copy_overlap (
             {
               std::cout << "Writing results for step " << step;
               std::cout.flush ();
-              write_vtk ("out_" + std::to_string (step) + ".vtk", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
+              // write_vtk ("out_" + std::to_string (step) + ".vtk", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
+              write_vtu ("out_" + std::to_string (step) + ".vtr", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
               std::cout << " completed" << std::endl;
             }
           thread_info.sync ();
