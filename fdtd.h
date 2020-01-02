@@ -16,6 +16,7 @@ enum class fdtd_fields : int
 void run_fdtd (
   int steps,
   int write_each,
+  int source_x_offset,
   double *elapsed_times,
   const grid_info_class &grid_info,
   grid_barrier_accessor_class &grid_accessor,
@@ -24,6 +25,7 @@ void run_fdtd (
 void run_fdtd_copy_overlap (
   int steps,
   int write_each,
+  int source_x_offset,
   double *elapsed_times,
   const grid_info_class &grid_info,
   grid_barrier_accessor_class &grid_accessor,

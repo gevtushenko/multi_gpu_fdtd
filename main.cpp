@@ -84,7 +84,9 @@ int main ()
 
   double single_gpu_time {};
 
-  for (int devices_count = 2; devices_count <= gpus_count; devices_count++)
+  const int source_x_offset = 0;
+
+  for (int devices_count = write_each > 0 ? gpus_count : 1; devices_count <= gpus_count; devices_count++)
     {
       std::cout << "\nStarting measurement for " << devices_count << std::endl;
 
@@ -108,8 +110,15 @@ int main ()
               grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
                 thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), static_cast<int> (fdtd_fields::fields_count));
 
-              // run_fdtd (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
-              run_fdtd_copy_overlap (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
+              if (thread_info.threads_count == 1)
+                {
+                  run_fdtd (steps_count, write_each, source_x_offset, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
+                }
+              else
+                {
+                  // run_fdtd (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
+                  run_fdtd_copy_overlap (steps_count, write_each, source_x_offset, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
+                }
             }
             catch (std::runtime_error &error) {
               std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;

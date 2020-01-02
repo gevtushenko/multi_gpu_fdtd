@@ -40,7 +40,7 @@ __global__ void initialize_fields (
       const float y = static_cast<float> (yi) * dy;
 
       const float soil_y = static_cast<float> (ny) * dy / 2.2;
-      const float object_y = soil_y - 3.0;
+      const float object_y = soil_y - 5.0;
       const float object_size = 2.0;
 
       if (y < soil_y)
@@ -203,8 +203,8 @@ __device__ float calculate_source (float t, float frequency)
 __device__ void update_e (
   int nx,
   int cell_id,
-  int process_ny,
   int own_in_process_begin,
+  int source_position,
 
   float t,
   float dx,
@@ -222,7 +222,7 @@ __device__ void update_e (
   const float chz = update_curl_h (nx, cell_id, cell_x, cell_y, dx, dy, hx, hy);
   dz[cell_id] += C0_p_dt * chz;
 
-  if (own_in_process_begin + cell_y == process_ny / 2 && cell_x == 2 * nx / 5)
+  if ((own_in_process_begin + cell_y) * nx + cell_x == source_position)
     dz[cell_id] += calculate_source (t, 1E+8);
 
   ez[cell_id] = dz[cell_id] / er[cell_id];
@@ -230,9 +230,9 @@ __device__ void update_e (
 
 __global__ void update_e_kernel (
   int nx,
-  int process_ny,
   int n_cells,
   int own_in_process_begin,
+  int source_position,
 
   float t,
   float dx,
@@ -247,14 +247,14 @@ __global__ void update_e_kernel (
   const unsigned int cell_id = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (cell_id < n_cells)
-    update_e (nx, cell_id, process_ny, own_in_process_begin, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
+    update_e (nx, cell_id, own_in_process_begin, source_position, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
 }
 
 __global__ void update_e_bulk_kernel (
   int nx,
-  int process_ny,
   int n_cells,
   int own_in_process_begin,
+  int source_position,
 
   float t,
   float dx,
@@ -269,13 +269,13 @@ __global__ void update_e_bulk_kernel (
   const unsigned int cell_id = nx + blockIdx.x * blockDim.x + threadIdx.x;
 
   if (cell_id < n_cells)
-    update_e (nx, cell_id, process_ny, own_in_process_begin, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
+    update_e (nx, cell_id, own_in_process_begin, source_position, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
 }
 
 __global__ void update_e_border_kernel (
   int nx,
-  int process_ny,
   int own_in_process_begin,
+  int source_position,
 
   float t,
   float dx,
@@ -290,7 +290,7 @@ __global__ void update_e_border_kernel (
   const unsigned int cell_id = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (cell_id < nx)
-    update_e (nx, cell_id, process_ny, own_in_process_begin, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
+    update_e (nx, cell_id, own_in_process_begin, source_position, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
 }
 
 #include "vtk_writer.h"
@@ -350,6 +350,7 @@ void write_vtk (
 void run_fdtd (
   int steps,
   int write_each,
+  int source_x_offset,
   double *elapsed_times,
   const grid_info_class &grid_info,
   grid_barrier_accessor_class &grid_accessor,
@@ -390,6 +391,7 @@ void run_fdtd (
   const float C0_p_dt = C0 * dt;
 
   float *cpu_e = grid_accessor.cpu_field;
+  const int source_position = (grid_info.process_ny / 2) * nx + 2 * nx / 5 + source_x_offset;
 
   cudaEvent_t start, stop;
   cudaEventCreate (&start);
@@ -407,7 +409,7 @@ void run_fdtd (
       thread_info.sync ();
 
       update_e_kernel<<<blocks_count, threads_per_block>>> (
-        nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
+        nx, n_own_cells, grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
         C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
 
       grid_accessor.sync_send_bottom (fdtd_fields::ez);
@@ -451,6 +453,7 @@ void run_fdtd (
 void run_fdtd_copy_overlap (
   int steps,
   int write_each,
+  int source_x_offset,
   double *elapsed_times,
   const grid_info_class &grid_info,
   grid_barrier_accessor_class &grid_accessor,
@@ -512,6 +515,8 @@ void run_fdtd_copy_overlap (
     fdtd_fields::ez,
   };
 
+  const int source_position = (grid_info.process_ny / 2) * nx + 2 * nx / 5 + source_x_offset;
+
   cudaEvent_t start, stop;
   cudaEventCreate (&start);
   cudaEventCreate (&stop);
@@ -533,12 +538,12 @@ void run_fdtd_copy_overlap (
 
       /// Compute bulk
       update_e_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (
-        nx, grid_info.process_ny, n_own_cells, grid_info.get_row_begin_in_process(), t, dx, dy,
+        nx, n_own_cells, grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
 
       /// Compute boundaries
       update_e_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_bottom_stream>>> (
-        nx, grid_info.process_ny, grid_info.get_row_begin_in_process(), t, dx, dy,
+        nx, grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
       grid_accessor.async_send_bottom (fields_to_update_after_e, push_bottom_stream);
 
