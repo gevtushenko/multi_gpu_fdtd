@@ -289,4 +289,5 @@ private:
   int row_end_in_process {};
 };
 
+
 #endif //MULTIGPUFDTD_GRID_INFO_H

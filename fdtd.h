@@ -7,6 +7,7 @@
 
 #include "barrier.h"
 #include "grid_info.h"
+#include "vtk_writer.h"
 
 enum class fdtd_fields : int
 {
@@ -19,6 +20,8 @@ void run_fdtd (
   int source_x_offset,
   double *elapsed_times,
   const grid_info_class &grid_info,
+  receiver_writer &receiver,
+  vtk_writer &writer,
   grid_barrier_accessor_class &grid_accessor,
   const thread_info_class &thread_info);
 
@@ -28,6 +31,8 @@ void run_fdtd_copy_overlap (
   int source_x_offset,
   double *elapsed_times,
   const grid_info_class &grid_info,
+  receiver_writer &receiver,
+  vtk_writer &writer,
   grid_barrier_accessor_class &grid_accessor,
   const thread_info_class &thread_info);
 

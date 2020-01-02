@@ -76,64 +76,95 @@ int main ()
   const float x_size_multiplier = 1.1;
   const float height = 160.0;
   const float width = x_size_multiplier * height;
-  const int write_each = 100;
+  const int write_each = 10;
   const int grid_size = 1400;
-  const int steps_count = 2200;
+  const int steps_count = 2400;
   const int process_nx = x_size_multiplier * static_cast<float> (grid_size);
   const int process_ny = grid_size;
 
   double single_gpu_time {};
 
-  const int source_x_offset = 0;
+  const std::vector<int> source_x_offsets = {
+    0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110
+  };
 
-  for (int devices_count = write_each > 0 ? gpus_count : 1; devices_count <= gpus_count; devices_count++)
-    {
-      std::cout << "\nStarting measurement for " << devices_count << std::endl;
-
+  /// Enable NVLINK
+  {
       std::vector<std::thread> threads;
-      threads.reserve (devices_count);
+      threads.reserve (gpus_count);
 
       /// Shared objects
-      barrier_class barrier (devices_count);
-      grid_barrier_class grid_barrier (devices_count, process_nx, process_ny);
-      std::vector<double> elapsed_times (devices_count);
+      barrier_class barrier (gpus_count);
 
-      for (int device_id = 0; device_id < devices_count; device_id++)
+      for (int device_id = 0; device_id < gpus_count; device_id++)
         {
-          thread_info_class thread_info (device_id, devices_count, barrier);
-          threads.emplace_back([thread_info, process_nx, process_ny, steps_count, width, height, write_each, &elapsed_times, &grid_barrier] () {
+          thread_info_class thread_info (device_id, gpus_count, barrier);
+          threads.emplace_back([thread_info] () {
             try {
-              prepare_nvlink (thread_info);
-
-              grid_info_class grid_info (width, height, process_nx, process_ny, thread_info);
-              print_memory_info (grid_info, thread_info);
-              grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
-                thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), static_cast<int> (fdtd_fields::fields_count));
-
-              if (thread_info.threads_count == 1)
-                {
-                  run_fdtd (steps_count, write_each, source_x_offset, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
-                }
-              else
-                {
-                  // run_fdtd (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
-                  run_fdtd_copy_overlap (steps_count, write_each, source_x_offset, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
-                }
-            }
+                prepare_nvlink (thread_info);
+              }
             catch (std::runtime_error &error) {
-              std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;
-            }
+                std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;
+              }
           });
         }
 
-      for (auto &thread: threads)
-        thread.join ();
+    for (auto &thread: threads)
+      thread.join ();
+  }
 
-      if (devices_count == 1)
-        single_gpu_time = elapsed_times[0];
+  receiver_writer receiver (steps_count / write_each, source_x_offsets.size ());
+  vtk_writer writer (width / process_nx, height / process_ny, process_nx, process_ny, "out");
 
-      const double max_time = *std::max_element (elapsed_times.begin (), elapsed_times.end ());
-      std::cout << "Parallel efficiency: " << single_gpu_time / max_time / devices_count << " (" << max_time << " s)" << std::endl;
+  for (const auto &source_x_offset: source_x_offsets)
+    {
+      for (int devices_count = write_each > 0 ? gpus_count : 1; devices_count <= gpus_count; devices_count++)
+        {
+          std::cout << "\nStarting measurement for " << devices_count << std::endl;
+
+          std::vector<std::thread> threads;
+          threads.reserve (devices_count);
+
+          /// Shared objects
+          barrier_class barrier (devices_count);
+          grid_barrier_class grid_barrier (devices_count, process_nx, process_ny);
+          std::vector<double> elapsed_times (devices_count);
+
+          for (int device_id = 0; device_id < devices_count; device_id++)
+            {
+              thread_info_class thread_info (device_id, devices_count, barrier);
+              threads.emplace_back([thread_info, process_nx, process_ny, steps_count, width, height, write_each, source_x_offset, &receiver, &elapsed_times, &writer, &grid_barrier] () {
+                try {
+                    grid_info_class grid_info (width, height, process_nx, process_ny, thread_info);
+                    print_memory_info (grid_info, thread_info);
+                    grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
+                      thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), static_cast<int> (fdtd_fields::fields_count));
+
+                    if (thread_info.threads_count == 1)
+                      {
+                        run_fdtd (steps_count, write_each, source_x_offset, elapsed_times.data (), grid_info, receiver, writer, grid_barrier_accessor, thread_info);
+                      }
+                    else
+                      {
+                        // run_fdtd (steps_count, write_each, elapsed_times.data (), grid_info, grid_barrier_accessor, thread_info);
+                        run_fdtd_copy_overlap (steps_count, write_each, source_x_offset, elapsed_times.data (), grid_info, receiver, writer, grid_barrier_accessor, thread_info);
+                      }
+                  }
+                catch (std::runtime_error &error) {
+                    std::cerr << "Error in thread " << thread_info.thread_id << ": " << error.what() << std::endl;
+                  }
+              });
+            }
+
+          for (auto &thread: threads)
+            thread.join ();
+
+          if (devices_count == 1)
+            single_gpu_time = elapsed_times[0];
+
+          const double max_time = *std::max_element (elapsed_times.begin (), elapsed_times.end ());
+          std::cout << "Parallel efficiency: " << single_gpu_time / max_time / devices_count << " (" << max_time << " s)" << std::endl;
+        }
     }
 
   return 0;

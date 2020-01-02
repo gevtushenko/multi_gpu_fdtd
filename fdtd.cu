@@ -358,6 +358,8 @@ void run_fdtd (
   int source_x_offset,
   double *elapsed_times,
   const grid_info_class &grid_info,
+  receiver_writer &receiver,
+  vtk_writer &writer,
   grid_barrier_accessor_class &grid_accessor,
   const thread_info_class &thread_info)
 {
@@ -433,7 +435,10 @@ void run_fdtd (
             {
               std::cout << "Writing results for step " << step;
               std::cout.flush ();
-              write_vtk ("out_" + std::to_string (step) + ".vtk", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
+
+              writer.write_vtu (cpu_e);
+              receiver.set_received_value (cpu_e[source_position]);
+
               std::cout << " completed" << std::endl;
             }
           thread_info.sync ();
@@ -461,6 +466,8 @@ void run_fdtd_copy_overlap (
   int source_x_offset,
   double *elapsed_times,
   const grid_info_class &grid_info,
+  receiver_writer &receiver,
+  vtk_writer &writer,
   grid_barrier_accessor_class &grid_accessor,
   const thread_info_class &thread_info)
 {
@@ -570,8 +577,10 @@ void run_fdtd_copy_overlap (
             {
               std::cout << "Writing results for step " << step;
               std::cout.flush ();
+              writer.write_vtu (cpu_e);
+              receiver.set_received_value (cpu_e[source_position]);
               // write_vtk ("out_" + std::to_string (step) + ".vtk", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
-              write_vtu ("out_" + std::to_string (step) + ".vtr", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
+              // write_vtu ("out_" + std::to_string (step) + ".vtr", dx, dy, grid_info.process_nx, grid_info.process_ny, cpu_e);
               std::cout << " completed" << std::endl;
             }
           thread_info.sync ();
