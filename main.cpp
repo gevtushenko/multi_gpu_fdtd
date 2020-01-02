@@ -76,16 +76,16 @@ int main ()
   const float x_size_multiplier = 1.1;
   const float height = 160.0;
   const float width = x_size_multiplier * height;
-  const int write_each = -10;
-  const int grid_size = 8800;
-  const int steps_count = 2400;
+  const int write_each = 10;
+  const int grid_size = 800;
+  const int steps_count = 1400;
   const int process_nx = x_size_multiplier * static_cast<float> (grid_size);
   const int process_ny = grid_size;
 
   double single_gpu_time {};
 
   const std::vector<int> source_x_offsets = {
-    0 //, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110
+    0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110
   };
 
   /// Enable NVLINK

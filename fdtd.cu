@@ -228,7 +228,7 @@ __device__ void update_e (
   dz[cell_id] += C0_p_dt * chz;
 
   if ((own_in_process_begin + cell_y) * nx + cell_x == source_position)
-    dz[cell_id] += calculate_source (t, 1E+8);
+    dz[cell_id] += calculate_source (t, 5E+7);
 
   ez[cell_id] = dz[cell_id] / er[cell_id];
 }
