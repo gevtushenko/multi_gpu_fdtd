@@ -84,22 +84,26 @@ receiver_writer::receiver_writer (
   int samples_count_arg)
   : time_steps_count (time_steps_count_arg)
   , samples_count (samples_count_arg)
-  , values (new float[time_steps_count * samples_count])
-  , writer (new vtk_writer (1.0, 0.1, samples_count, time_steps_count, "rx"))
+  , values (time_steps_count > 0 ? new float[time_steps_count * samples_count] : nullptr)
+  , writer (time_steps_count > 0 ? new vtk_writer (1.0, 0.1, samples_count, time_steps_count, "rx") : nullptr)
 {
-  std::fill_n (values.get (), time_steps_count * samples_count, 0.0);
+  if (values)
+    std::fill_n (values.get (), time_steps_count * samples_count, 0.0);
 }
 
 void receiver_writer::set_received_value (float value)
 {
-  values[(time_steps_count - 1 - time) * samples_count + sample] = value;
-  writer->write_vtu (values.get ());
-
-  time++;
-
-  if (time == time_steps_count)
+  if (values)
     {
-      time = 0;
-      sample++;
+      values[(time_steps_count - 1 - time) * samples_count + sample] = value;
+      writer->write_vtu (values.get ());
+
+      time++;
+
+      if (time == time_steps_count)
+        {
+          time = 0;
+          sample++;
+        }
     }
 }

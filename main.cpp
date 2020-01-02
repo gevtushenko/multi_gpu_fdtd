@@ -76,8 +76,8 @@ int main ()
   const float x_size_multiplier = 1.1;
   const float height = 160.0;
   const float width = x_size_multiplier * height;
-  const int write_each = 10;
-  const int grid_size = 1400;
+  const int write_each = -10;
+  const int grid_size = 8800;
   const int steps_count = 2400;
   const int process_nx = x_size_multiplier * static_cast<float> (grid_size);
   const int process_ny = grid_size;
@@ -85,7 +85,7 @@ int main ()
   double single_gpu_time {};
 
   const std::vector<int> source_x_offsets = {
-    0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110
+    0 //, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110
   };
 
   /// Enable NVLINK
@@ -135,6 +135,7 @@ int main ()
               thread_info_class thread_info (device_id, devices_count, barrier);
               threads.emplace_back([thread_info, process_nx, process_ny, steps_count, width, height, write_each, source_x_offset, &receiver, &elapsed_times, &writer, &grid_barrier] () {
                 try {
+                    cudaSetDevice (thread_info.thread_id);
                     grid_info_class grid_info (width, height, process_nx, process_ny, thread_info);
                     print_memory_info (grid_info, thread_info);
                     grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
