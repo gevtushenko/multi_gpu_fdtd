@@ -73,12 +73,13 @@ int main ()
   int gpus_count {};
   cudaGetDeviceCount (&gpus_count);
 
-  const float width = 20.0;
-  const float height = 10.0;
-  const int write_each = 30;
+  const float x_size_multiplier = 1.1;
+  const float height = 160.0;
+  const float width = x_size_multiplier * height;
+  const int write_each = 10;
   const int grid_size = 1000;
-  const int steps_count = 1000;
-  const int process_nx = 2 * grid_size;
+  const int steps_count = 1600;
+  const int process_nx = x_size_multiplier * static_cast<float> (grid_size);
   const int process_ny = grid_size;
 
   double single_gpu_time {};

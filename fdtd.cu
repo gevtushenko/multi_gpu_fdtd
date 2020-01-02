@@ -5,13 +5,18 @@ constexpr float C0 = 299792458.0f; /// Speed of light [metres per second]
 
 float calculate_dt (float dx, float dy)
 {
-  const float cfl = 0.4;
+  const float cfl = 0.3;
   return cfl * std::min (dx, dy) / C0;
 }
 
 __global__ void initialize_fields (
   int n_cells,
+  int nx,
+  int ny,
+  int own_in_process_y_begin,
   float dt,
+  float dx,
+  float dy,
   float *own_er,
   float *own_hr,
   float *own_mh,
@@ -25,8 +30,31 @@ __global__ void initialize_fields (
 
   if (own_cell_id < n_cells)
     {
-      own_er[own_cell_id] = 1.0;
-      own_hr[own_cell_id] = 1.0;
+      float er = 1.0;
+      float hr = 1.0;
+
+      const int yi = own_in_process_y_begin + own_cell_id / nx;
+      const int xi = own_cell_id % nx;
+
+      const float x = static_cast<float> (xi) * dx;
+      const float y = static_cast<float> (yi) * dy;
+
+      const float soil_y = static_cast<float> (ny) * dy / 2.2;
+      const float object_y = soil_y - 3.0;
+      const float object_size = 2.0;
+
+      if (y < soil_y)
+        {
+          const float middle_x = static_cast<float> (nx) * dx / 2;
+
+          if (x > middle_x - object_size / 2.0f && x < middle_x + object_size / 2 && y > object_y - object_size / 2.0 && y < object_y + object_size / 2.0)
+            er = hr = 200000; /// Relative permeabuliti of Iron
+          else
+            er = hr = 1.5;
+        }
+
+      own_er[own_cell_id] = er;
+      own_hr[own_cell_id] = hr;
 
       own_hx[own_cell_id] = 0.0;
       own_hy[own_cell_id] = 0.0;
@@ -194,8 +222,8 @@ __device__ void update_e (
   const float chz = update_curl_h (nx, cell_id, cell_x, cell_y, dx, dy, hx, hy);
   dz[cell_id] += C0_p_dt * chz;
 
-  if (own_in_process_begin + cell_y == (process_ny * 2) / 5 && cell_x == nx / 4)
-    dz[cell_id] += calculate_source (t, 1E+9);
+  if (own_in_process_begin + cell_y == process_ny / 2 && cell_x == 2 * nx / 5)
+    dz[cell_id] += calculate_source (t, 1E+8);
 
   ez[cell_id] = dz[cell_id] / er[cell_id];
 }
@@ -343,7 +371,7 @@ void run_fdtd (
   float *own_dz = grid_accessor.get_own_data (fdtd_fields::dz);
 
   initialize_fields<<<blocks_count, threads_per_block>>> (
-    n_own_cells, dt,
+    n_own_cells, nx, grid_info.process_ny, grid_info.get_row_begin_in_process (), dt, grid_info.get_dx (), grid_info.get_dy (),
     own_er, own_hr, own_mh, own_hx, own_hy, own_ez, own_dz);
 
   thread_info.sync (); ///< Wait for all threads to allocate their fields
@@ -446,8 +474,8 @@ void run_fdtd_copy_overlap (
   float *own_dz = grid_accessor.get_own_data (fdtd_fields::dz);
 
   initialize_fields<<<blocks_count, threads_per_block>>> (
-    n_own_cells, dt,
-      own_er, own_hr, own_mh, own_hx, own_hy, own_ez, own_dz);
+    n_own_cells, nx, grid_info.process_ny, grid_info.get_row_begin_in_process (), dt, grid_info.get_dx (), grid_info.get_dy (),
+    own_er, own_hr, own_mh, own_hx, own_hy, own_ez, own_dz);
 
   thread_info.sync (); ///< Wait for other threads to complete allocation
   grid_accessor.sync_send (fdtd_fields::er);
