@@ -76,9 +76,9 @@ int main ()
   const float x_size_multiplier = 1.1;
   const float height = 160.0;
   const float width = x_size_multiplier * height;
-  const int write_each = 10;
-  const int grid_size = 1000;
-  const int steps_count = 1600;
+  const int write_each = 100;
+  const int grid_size = 1400;
+  const int steps_count = 2200;
   const int process_nx = x_size_multiplier * static_cast<float> (grid_size);
   const int process_ny = grid_size;
 
