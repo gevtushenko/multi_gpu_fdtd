@@ -40,19 +40,24 @@ __global__ void initialize_fields (
       const float y = static_cast<float> (yi) * dy;
 
       const float soil_y = static_cast<float> (ny) * dy / 2.2;
-      const float object_y = soil_y - 8.0;
-      const float object_size = 3.0;
+      const float object_1_y = soil_y - 8.0;
+      const float object_2_y = soil_y - 18.0;
+      const float object_1_size = 3.0;
+      const float object_2_size = 8.0;
 
       if (y < soil_y)
         {
           const float middle_x = static_cast<float> (nx) * dx / 2;
-          const float object_x = middle_x;
+          const float object_1_x = middle_x;
+          const float object_2_x = middle_x - 20;
 
           // square
           // if (x > middle_x - object_size / 2.0f && x < middle_x + object_size / 2 && y > object_y - object_size / 2.0 && y < object_y + object_size / 2.0)
 
           // circle
-          if ((x - object_x) * (x - object_x) + (y - object_y) * (y - object_y) <= object_size * object_size)
+          if ((x - object_1_x) * (x - object_1_x) + (y - object_1_y) * (y - object_1_y) <= object_1_size * object_1_size)
+            er = hr = 200000; /// Relative permeabuliti of Iron
+          else if ((x - object_2_x) * (x - object_2_x) + (y - object_2_y) * (y - object_2_y) <= object_2_size * object_2_size)
             er = hr = 200000; /// Relative permeabuliti of Iron
           else
             er = hr = 1.5;
