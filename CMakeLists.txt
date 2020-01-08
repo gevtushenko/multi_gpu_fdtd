@@ -25,7 +25,7 @@ find_package(VTK COMPONENTS
         vtkRenderingFreeType
         vtkRenderingOpenGL2 REQUIRED)
 
-add_executable(MultiGPUFDTD main.cpp barrier.h grid_info.h gpu_utils.h fdtd.cu fdtd.h vtk_writer.h vtk_writer.cpp)
+add_executable(MultiGPUFDTD main.cpp barrier.h grid_info.h gpu_utils.h fdtd.cuh fdtd.cu fdtd.h vtk_writer.h vtk_writer.cpp)
 target_include_directories(MultiGPUFDTD PRIVATE ${CUDA_INCLUDE_DIRS} ${VTK_INCLUDE_DIRS})
 target_link_libraries(MultiGPUFDTD ${VTK_LIBRARIES})
 
