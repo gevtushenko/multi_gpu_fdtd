@@ -36,7 +36,7 @@ void run_fdtd_copy_overlap (
   grid_barrier_accessor_class &grid_accessor,
   const thread_info_class &thread_info);
 
-void run_fdtd_copy_overlap_2d (
+void run_fdtd_copy_overlap_int_fastdiv (
   int steps,
   int write_each,
   int source_x_offset,

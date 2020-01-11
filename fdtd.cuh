@@ -66,10 +66,9 @@ __device__ void update_h (
   hy[cell_id] -= mh[cell_id] * cey;
 }
 
-__device__ void update_h_2d (
-  int nx,
-  int cell_x,
-  int cell_y,
+#include "int_fastdiv.h"
+__device__ void update_h_int_fastdiv (
+  int_fastdiv nx,
   int cell_id,
 
   float dx,
@@ -79,6 +78,9 @@ __device__ void update_h_2d (
   float * __restrict__ hx,
   float * __restrict__ hy)
 {
+  const int cell_x = cell_id % nx;
+  const int cell_y = cell_id / nx;
+
   const float cex = update_curl_ex (nx, cell_x, cell_y, cell_id, dy, ez);
   const float cey = update_curl_ey (nx, cell_x, cell_y, cell_id, dx, ez);
 
@@ -118,6 +120,34 @@ __device__ float calculate_source (float t, float frequency)
 
 __device__ void update_e (
   int nx,
+  int cell_id,
+  int own_in_process_begin,
+  int source_position,
+
+  float t,
+  float dx,
+  float dy,
+  float C0_p_dt,
+  float * __restrict__ ez,
+  float * __restrict__ dz,
+  const float * __restrict__ er,
+  const float * __restrict__ hx,
+  const float * __restrict__ hy)
+{
+  const int cell_x = cell_id % nx;
+  const int cell_y = cell_id / nx;
+
+  const float chz = update_curl_h (nx, cell_id, cell_x, cell_y, dx, dy, hx, hy);
+  dz[cell_id] += C0_p_dt * chz;
+
+  if ((own_in_process_begin + cell_y) * nx + cell_x == source_position)
+    dz[cell_id] += calculate_source (t, 5E+7);
+
+  ez[cell_id] = dz[cell_id] / er[cell_id];
+}
+
+__device__ void update_e_int_fastdiv (
+  int_fastdiv nx,
   int cell_id,
   int own_in_process_begin,
   int source_position,

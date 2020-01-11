@@ -119,8 +119,8 @@ __global__ void update_h_bulk_kernel (
     update_h (nx, tid, dx, dy, ez, mh, hx, hy);
 }
 
-__global__ void update_h_bulk_kernel_2d (
-  int nx,
+__global__ void update_h_bulk_kernel_fastdiv (
+  int_fastdiv nx,
   int n_own_y,
 
   float dx,
@@ -130,12 +130,10 @@ __global__ void update_h_bulk_kernel_2d (
   float * __restrict__ hx,
   float * __restrict__ hy)
 {
-  const int cell_x = blockDim.x * blockIdx.x + threadIdx.x;
-  const int cell_y = blockDim.y * blockIdx.y + threadIdx.y;
-  const int tid = cell_y * nx + cell_x;
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
-  if (cell_y < n_own_y - 1 && cell_x < nx)
-    update_h_2d (nx, cell_x, cell_y, tid, dx, dy, ez, mh, hx, hy);
+  if (tid < nx * (n_own_y - 1))
+    update_h_int_fastdiv (nx, tid, dx, dy, ez, mh, hx, hy);
 }
 
 __global__ void update_e_kernel (
@@ -162,6 +160,28 @@ __global__ void update_e_kernel (
 
 __global__ void update_e_bulk_kernel (
   int nx,
+  int n_cells,
+  int own_in_process_begin,
+  int source_position,
+
+  float t,
+  float dx,
+  float dy,
+  float C0_p_dt,
+  float * __restrict__ ez,
+  float * __restrict__ dz,
+  const float * __restrict__ er,
+  const float * __restrict__ hx,
+  const float * __restrict__ hy)
+{
+  const unsigned int cell_id = nx + blockIdx.x * blockDim.x + threadIdx.x;
+
+  if (cell_id < n_cells)
+    update_e (nx, cell_id, own_in_process_begin, source_position, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
+}
+
+__global__ void update_e_bulk_kernel_fastdiv (
+  int_fastdiv nx,
   int n_cells,
   int own_in_process_begin,
   int source_position,
@@ -510,7 +530,7 @@ void run_fdtd_copy_overlap (
   thread_info.sync ();
 }
 
-void run_fdtd_copy_overlap_2d (
+void run_fdtd_copy_overlap_int_fastdiv (
   int steps,
   int write_each,
   int source_x_offset,
@@ -529,9 +549,6 @@ void run_fdtd_copy_overlap_2d (
   const int blocks_count = (n_own_cells + threads_per_block - 1) / threads_per_block;
   const int borders_blocks_count = (nx + threads_per_block - 1) / threads_per_block;
   const int bulk_blocks_count = (n_own_cells - nx + threads_per_block - 1) / threads_per_block;
-
-  dim3 block_2d (512, 2);
-  dim3 grid_2d ((nx + block_2d.x - 1) / block_2d.x, (grid_info.get_n_own_y () - 1 + block_2d.y - 1) / block_2d.y);
 
   float *own_er = grid_accessor.get_own_data (fdtd_fields::er);
   float *own_hr = grid_accessor.get_own_data (fdtd_fields::hr);
@@ -582,6 +599,8 @@ void run_fdtd_copy_overlap_2d (
 
   const int source_position = (grid_info.process_ny / 2) * nx + 2 * nx / 5 + source_x_offset;
 
+  int_fastdiv nx_fastdiv (nx);
+
   cudaEvent_t start, stop;
   cudaEventCreate (&start);
   cudaEventCreate (&stop);
@@ -591,7 +610,7 @@ void run_fdtd_copy_overlap_2d (
   for (int step = 0; step < steps; step++)
     {
       /// Compute bulk
-      update_h_bulk_kernel_2d<<<grid_2d, block_2d, 0, compute_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
+      update_h_bulk_kernel_fastdiv<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (nx_fastdiv, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
 
       /// Compute boundaries
       update_h_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_top_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
@@ -602,7 +621,7 @@ void run_fdtd_copy_overlap_2d (
       thread_info.sync ();
 
       /// Compute bulk
-      update_e_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (
+      update_e_bulk_kernel_fastdiv<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (
         nx, n_own_cells, grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
 
