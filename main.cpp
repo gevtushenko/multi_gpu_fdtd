@@ -230,7 +230,22 @@ int main (int argc, char *argv[])
           {
             run_fdtd (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
           });
+          const double max_overlap_time = run_fdtd (devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
+            (
+              int steps,
+              int write_each,
+              int source_x_offset,
+              double *elapsed_times,
+              const grid_info_class &grid_info,
+              receiver_writer &receiver,
+              vtk_writer &writer,
+              grid_barrier_accessor_class &grid_accessor,
+              const thread_info_class &thread_info)
+          {
+            run_fdtd_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
+          });
           std::cout << "Parallel efficiency: " << single_gpu_time / max_time / devices_count << " (" << max_time << " s)" << std::endl;
+          std::cout << "Parallel efficiency (overlap): " << single_gpu_time / max_overlap_time / devices_count << " (" << max_overlap_time << " s)" << std::endl;
         }
     }
 
