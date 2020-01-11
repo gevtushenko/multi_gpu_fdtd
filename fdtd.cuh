@@ -1,6 +1,8 @@
 #ifndef FDTD_CUH_
 #define FDTD_CUH_
 
+#include <algorithm>
+
 constexpr float C0 = 299792458.0f; /// Speed of light [metres per second]
 
 float calculate_dt (float dx, float dy)
