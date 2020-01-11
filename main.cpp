@@ -148,7 +148,7 @@ void run_and_save (
         grid_barrier_accessor_class &grid_accessor,
         const thread_info_class &thread_info)
       {
-        run_fdtd_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
+        run_fdtd_copy_overlap_2d (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
       });
 }
 
@@ -160,10 +160,9 @@ int main (int argc, char *argv[])
   const float x_size_multiplier = 1.1;
   const float height = 160.0;
   const float width = x_size_multiplier * height;
-  const int grid_size = 2000;
   const int steps_count = 1400;
-  const int process_nx = x_size_multiplier * static_cast<float> (grid_size);
-  const int process_ny = grid_size;
+  const int process_nx = 512;
+  const int process_ny = 8024;
 
   /// Enable NVLINK
   {
@@ -244,8 +243,27 @@ int main (int argc, char *argv[])
           {
             run_fdtd_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
           });
+
+          const double max_overlap_time_2d = run_fdtd (devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
+            (
+              int steps,
+              int write_each,
+              int source_x_offset,
+              double *elapsed_times,
+              const grid_info_class &grid_info,
+              receiver_writer &receiver,
+              vtk_writer &writer,
+              grid_barrier_accessor_class &grid_accessor,
+              const thread_info_class &thread_info)
+          {
+            run_fdtd_copy_overlap_2d (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
+          });
+
+          std::cout << std::endl;
+          std::cout << "Single GPU: " << single_gpu_time << "s" << std::endl;
           std::cout << "Parallel efficiency: " << single_gpu_time / max_time / devices_count << " (" << max_time << " s)" << std::endl;
           std::cout << "Parallel efficiency (overlap): " << single_gpu_time / max_overlap_time / devices_count << " (" << max_overlap_time << " s)" << std::endl;
+          std::cout << "Parallel efficiency (overlap, 2d): " << single_gpu_time / max_overlap_time_2d / devices_count << " (" << max_overlap_time_2d << " s)" << std::endl;
         }
     }
 

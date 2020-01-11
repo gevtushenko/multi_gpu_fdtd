@@ -66,6 +66,27 @@ __device__ void update_h (
   hy[cell_id] -= mh[cell_id] * cey;
 }
 
+__device__ void update_h_2d (
+  int nx,
+  int cell_x,
+  int cell_y,
+  int cell_id,
+
+  float dx,
+  float dy,
+  const float * __restrict__ ez,
+  const float * __restrict__ mh,
+  float * __restrict__ hx,
+  float * __restrict__ hy)
+{
+  const float cex = update_curl_ex (nx, cell_x, cell_y, cell_id, dy, ez);
+  const float cey = update_curl_ey (nx, cell_x, cell_y, cell_id, dx, ez);
+
+  // update_h
+  hx[cell_id] -= mh[cell_id] * cex;
+  hy[cell_id] -= mh[cell_id] * cey;
+}
+
 __device__ static float update_curl_h (
   int nx,
   int cell_id,
