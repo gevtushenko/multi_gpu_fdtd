@@ -26,9 +26,9 @@ find_package(VTK COMPONENTS
         vtkRenderingOpenGL2 REQUIRED)
 
 add_executable(MultiGPUFDTD main.cpp barrier.h grid_info.h gpu_utils.h fdtd.cuh fdtd.cu fdtd.h vtk_writer.h vtk_writer.cpp)
-target_include_directories(MultiGPUFDTD PRIVATE ${CUDA_INCLUDE_DIRS} ${VTK_INCLUDE_DIRS} external/int_fastdiv)
+target_include_directories(MultiGPUFDTD PRIVATE ${CUDA_INCLUDE_DIRS} ${VTK_INCLUDE_DIRS})
 target_link_libraries(MultiGPUFDTD ${VTK_LIBRARIES})
 
 add_executable(benchmark benchmark.cu)
-target_include_directories(benchmark PRIVATE ${CUDA_INCLUDE_DIRS} external/int_fastdiv/)
+target_include_directories(benchmark PRIVATE ${CUDA_INCLUDE_DIRS})
 target_link_libraries(benchmark cuda_benchmark)
