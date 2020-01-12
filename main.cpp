@@ -140,7 +140,7 @@ void run_and_save (
 
   for (const auto &source_x_offset: source_x_offsets)
     run_fdtd (
-      20, devices_count, steps_count, process_nx, process_ny, height, width, write_each, source_x_offset, receiver, writer,
+      100, devices_count, steps_count, process_nx, process_ny, height, width, write_each, source_x_offset, receiver, writer,
       [] (
         int steps,
         int write_each,
@@ -165,7 +165,7 @@ int main (int argc, char *argv[])
   const float height = 160.0;
   const float width = x_size_multiplier * height;
   const int steps_count = 1400;
-  const int process_nx = 2000;
+  const int process_nx = 800;
   const int process_ny = process_nx;
 
   /// Enable NVLINK
