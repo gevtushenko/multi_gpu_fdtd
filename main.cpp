@@ -70,6 +70,7 @@ void print_memory_info (const grid_info_class &grid_info, const thread_info_clas
 
 template <typename action_type>
 double run_fdtd (
+  int R,
   int devices_count,
   const int steps_count,
   const int process_nx,
@@ -89,20 +90,23 @@ double run_fdtd (
 
   /// Shared objects
   barrier_class barrier (devices_count);
-  grid_barrier_class grid_barrier (devices_count, process_nx, process_ny);
+  grid_barrier_class grid_barrier (devices_count, process_nx, process_ny, R);
   std::vector<double> elapsed_times (devices_count);
 
   for (int device_id = 0; device_id < devices_count; device_id++)
     {
       thread_info_class thread_info (device_id, devices_count, barrier);
-      threads.emplace_back([thread_info, process_nx, process_ny, steps_count, width, height, write_each, source_x_offset,
+      threads.emplace_back([thread_info, process_nx, process_ny, steps_count, width, height, write_each, source_x_offset, R,
                             &receiver, &elapsed_times, &writer, &grid_barrier, &action] () {
         try {
             cudaSetDevice (thread_info.thread_id);
-            grid_info_class grid_info (width, height, process_nx, process_ny, thread_info);
+            grid_info_class grid_info (R, width, height, process_nx, process_ny, thread_info);
             print_memory_info (grid_info, thread_info);
             grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
-              thread_info.thread_id, grid_info.get_nx (), grid_info.get_ny (), static_cast<int> (fdtd_fields::fields_count));
+              thread_info.thread_id,
+              grid_info.get_nx (),
+              grid_info.get_ny (),
+              static_cast<int> (fdtd_fields::fields_count));
 
             action (steps_count, write_each, source_x_offset, elapsed_times.data (), grid_info, receiver, writer, grid_barrier_accessor, thread_info);
           }
@@ -129,14 +133,14 @@ void run_and_save (
   vtk_writer &writer)
 {
   const std::vector<int> source_x_offsets = {
-    0, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110
+    0
   };
 
   receiver_writer receiver (steps_count / write_each, source_x_offsets.size ());
 
   for (const auto &source_x_offset: source_x_offsets)
     run_fdtd (
-      devices_count, steps_count, process_nx, process_ny, height, width, write_each, source_x_offset, receiver, writer,
+      20, devices_count, steps_count, process_nx, process_ny, height, width, write_each, source_x_offset, receiver, writer,
       [] (
         int steps,
         int write_each,
@@ -148,7 +152,7 @@ void run_and_save (
         grid_barrier_accessor_class &grid_accessor,
         const thread_info_class &thread_info)
       {
-        run_fdtd (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
+        run_fdtd_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
       });
 }
 
@@ -161,7 +165,7 @@ int main (int argc, char *argv[])
   const float height = 160.0;
   const float width = x_size_multiplier * height;
   const int steps_count = 1400;
-  const int process_nx = 8000;
+  const int process_nx = 2000;
   const int process_ny = process_nx;
 
   /// Enable NVLINK
@@ -193,12 +197,12 @@ int main (int argc, char *argv[])
 
   if (argc == 2)
     {
-      run_and_save (gpus_count, steps_count, process_nx, process_ny, height, width, 10 /* write_each */, writer);
+      run_and_save (gpus_count, steps_count, process_nx, process_ny, height, width, 1 /* write_each */, writer);
     }
   else
     {
       receiver_writer receiver (0, 0);
-      const double single_gpu_time = run_fdtd (1, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
+      const double single_gpu_time = run_fdtd (0, 1, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
         (
           int steps,
           int write_each,
@@ -215,7 +219,7 @@ int main (int argc, char *argv[])
 
       for (int devices_count = 2; devices_count <= gpus_count; devices_count++)
         {
-          const double max_time = run_fdtd (devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
+          const double max_time = run_fdtd (0, devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
             (
               int steps,
               int write_each,
@@ -229,7 +233,7 @@ int main (int argc, char *argv[])
           {
             run_fdtd (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
           });
-          const double max_overlap_time = run_fdtd (devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
+          const double max_overlap_time = run_fdtd (0, devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
             (
               int steps,
               int write_each,
@@ -243,7 +247,8 @@ int main (int argc, char *argv[])
           {
             run_fdtd_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
           });
-          const double max_overlap_time_fastdiv = run_fdtd (devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
+
+          const double max_overlap_time_R1 = run_fdtd (1, devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
             (
               int steps,
               int write_each,
@@ -255,14 +260,14 @@ int main (int argc, char *argv[])
               grid_barrier_accessor_class &grid_accessor,
               const thread_info_class &thread_info)
           {
-            run_fdtd_copy_overlap_int_fastdiv (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
+            run_fdtd_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
           });
 
           std::cout << std::endl;
           std::cout << "Single GPU: " << single_gpu_time << "s" << std::endl;
           std::cout << "Parallel efficiency: " << single_gpu_time / max_time / devices_count << " (" << max_time << " s)" << std::endl;
           std::cout << "Parallel efficiency (overlap): " << single_gpu_time / max_overlap_time / devices_count << " (" << max_overlap_time << " s)" << std::endl;
-          std::cout << "Parallel efficiency (overlap, fastdiv): " << single_gpu_time / max_overlap_time_fastdiv / devices_count << " (" << max_overlap_time_fastdiv << " s)" << std::endl;
+          std::cout << "Parallel efficiency (overlap, R=1): " << single_gpu_time / max_overlap_time_R1 / devices_count << " (" << max_overlap_time_R1 << " s)" << std::endl;
         }
     }
 

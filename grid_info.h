@@ -16,6 +16,7 @@ class grid_barrier_accessor_class
 public:
   grid_barrier_accessor_class () = delete;
   grid_barrier_accessor_class (
+    int R_arg,
     cudaEvent_t *push_top_arg,
     cudaEvent_t *push_bottom_arg,
     cudaEvent_t *compute_h_arg,
@@ -26,7 +27,8 @@ public:
     int nx_arg, int ny_arg,
     int elements_per_cell_arg,
     float *cpu_field_arg)
-    : own_device_id (device_id_arg)
+    : R (R_arg)
+    , own_device_id (device_id_arg)
     , devices_count (devices_count_arg)
     , nx (nx_arg)
     , ny (ny_arg)
@@ -75,7 +77,7 @@ public:
   template <typename enum_type>
   float *get_own_data (enum_type field_num)
   {
-    return grid[own_device_id] + static_cast<int> (field_num) * (nx * ny) + nx; ///< Skip ghost cells
+    return grid[own_device_id] + static_cast<int> (field_num) * (nx * ny) + ghost_layer_size (); ///< Skip ghost cells
   }
 
   template <typename enum_type>
@@ -87,13 +89,15 @@ public:
   template <typename enum_type>
   float *get_top_copy_src (enum_type field_num)
   {
-    return get_own_data (field_num) - 3 * nx + (nx * ny);
+    return get_own_data (field_num) - ghost_layer_size () ///< Get into gpu coordinates (not own)
+         + (nx * ny)  ///< Past the end
+         - 2 * ghost_layer_size (); ///< Step over ghost layer and own data
   }
 
   template <typename enum_type>
   float *get_bottom_copy_dst (enum_type field_num)
   {
-    return grid[get_neighbor_device_bottom ()] + static_cast<int> (field_num) * (nx * ny) + (nx * ny) - nx;
+    return grid[get_neighbor_device_bottom ()] + static_cast<int> (field_num) * (nx * ny) + (nx * ny) - ghost_layer_size ();
   }
 
   template <typename enum_type>
@@ -112,20 +116,20 @@ public:
   template <typename enum_type>
   void sync_send_top (enum_type field_num)
   {
-    throw_on_error (cudaMemcpy (get_top_copy_dst (field_num), get_top_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault), __FILE__, __LINE__);
+    throw_on_error (cudaMemcpy (get_top_copy_dst (field_num), get_top_copy_src (field_num), ghost_layer_size_in_bytes(), cudaMemcpyDefault), __FILE__, __LINE__);
   }
 
   template <typename enum_type>
   void sync_send_bottom (enum_type field_num)
   {
-    throw_on_error (cudaMemcpy (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), nx * sizeof (float), cudaMemcpyDeviceToDevice), __FILE__, __LINE__);
+    throw_on_error (cudaMemcpy (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), ghost_layer_size_in_bytes (), cudaMemcpyDeviceToDevice), __FILE__, __LINE__);
   }
 
   template <typename enum_type>
   void async_send_top (const std::vector<enum_type> &fields_num, cudaStream_t &stream_top)
   {
     for (auto &field_num: fields_num)
-      throw_on_error (cudaMemcpyAsync (get_top_copy_dst (field_num), get_top_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault, stream_top), __FILE__, __LINE__);
+      throw_on_error (cudaMemcpyAsync (get_top_copy_dst (field_num), get_top_copy_src (field_num), ghost_layer_size_in_bytes (), cudaMemcpyDefault, stream_top), __FILE__, __LINE__);
     cudaEventRecord (*get_top_done (own_device_id), stream_top);
   }
 
@@ -133,7 +137,7 @@ public:
   void async_send_bottom (const std::vector<enum_type> &fields_num, cudaStream_t &stream_bottom)
   {
     for (auto &field_num: fields_num)
-      throw_on_error (cudaMemcpyAsync (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), nx * sizeof (float), cudaMemcpyDefault, stream_bottom), __FILE__, __LINE__);
+      throw_on_error (cudaMemcpyAsync (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), ghost_layer_size_in_bytes (), cudaMemcpyDefault, stream_bottom), __FILE__, __LINE__);
     cudaEventRecord (*get_bottom_done (own_device_id), stream_bottom);
   }
 
@@ -163,7 +167,18 @@ private:
     return events + device_id;
   }
 
+  size_t ghost_layer_size () const
+  {
+    return nx * (R + 1);
+  }
+
+  size_t ghost_layer_size_in_bytes () const
+  {
+    return ghost_layer_size() * sizeof (float);
+  }
+
 private:
+  int R {};
   int own_device_id {};
   int devices_count {};
   int nx {};
@@ -182,8 +197,9 @@ public:
 class grid_barrier_class
 {
 public:
-  explicit grid_barrier_class (int devices_count_arg, int process_nx, int process_ny)
+  explicit grid_barrier_class (int devices_count_arg, int process_nx, int process_ny, int R_arg = 0)
     : devices_count (devices_count_arg)
+    , R (R_arg)
     , push_top_done (new cudaEvent_t[devices_count])
     , push_bottom_done (new cudaEvent_t[devices_count])
     , compute_h (new cudaEvent_t[devices_count])
@@ -201,6 +217,7 @@ public:
   grid_barrier_accessor_class create_accessor (int device_id, int nx, int ny, int elements_per_cell)
   {
     return {
+      R,
       push_top_done.get (),
       push_bottom_done.get (),
       compute_h.get (),
@@ -216,6 +233,7 @@ public:
 
 private:
   int devices_count {};
+  int R {};
   std::unique_ptr<cudaEvent_t[]> push_top_done;
   std::unique_ptr<cudaEvent_t[]> push_bottom_done;
   std::unique_ptr<cudaEvent_t[]> compute_h;
@@ -230,12 +248,14 @@ class grid_info_class
 public:
   grid_info_class () = delete;
   grid_info_class (
+    int R_arg,
     float width_arg,
     float height_arg,
     int process_nx_arg,
     int process_ny_arg,
     const thread_info_class &thread_info)
-    : process_nx (process_nx_arg)
+    : R (R_arg)
+    , process_nx (process_nx_arg)
     , process_ny (process_ny_arg)
     , own_nx (process_nx)
     , width (width_arg)
@@ -253,8 +273,10 @@ public:
                        : process_ny;
 
     nx = own_nx;
-    ny = own_ny + 2;
+    ny = own_ny + 2 * (R + 1);
   }
+
+  int get_R () const { return R; }
 
   int get_nx () const { return nx; }
   int get_ny () const { return ny; }
@@ -273,6 +295,7 @@ public:
   const int process_ny {};
 
 private:
+  int R {};
   int own_nx {};
   int own_ny {};
 
