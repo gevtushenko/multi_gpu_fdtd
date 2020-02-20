@@ -139,11 +139,11 @@ void run_and_save (
     0
   };
 
-  receiver_writer receiver (steps_count / write_each, source_x_offsets.size ());
+  receiver_writer receiver (0, source_x_offsets.size ());
 
   for (const auto &source_x_offset: source_x_offsets)
     run_fdtd (
-      100, devices_count, steps_count, process_nx, process_ny, height, width, write_each, source_x_offset, receiver, writer,
+      2, devices_count, steps_count, process_nx, process_ny, height, width, write_each, source_x_offset, receiver, writer,
       [] (
         int steps,
         int write_each,
@@ -155,7 +155,7 @@ void run_and_save (
         grid_barrier_accessor_class &grid_accessor,
         const thread_info_class &thread_info)
       {
-        run_fdtd_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
+        run_fdtd_b2r_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
       });
 }
 
