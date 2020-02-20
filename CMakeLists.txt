@@ -4,7 +4,6 @@ project(MultiGPUFDTD LANGUAGES CXX CUDA)
 set(CMAKE_CXX_STANDARD 14)
 
 find_package(CUDA REQUIRED)
-add_subdirectory(external/cuda_benchmark)
 
 set(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -lineinfo -gencode arch=compute_75,code=sm_75")
 if (CMAKE_BUILD_TYPE MATCHES "Debug")

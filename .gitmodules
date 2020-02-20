@@ -1,3 +1,0 @@
-[submodule "external/cuda_benchmark"]
-	path = external/cuda_benchmark
-	url = https://github.com/senior-zero/cuda_benchmark.git
