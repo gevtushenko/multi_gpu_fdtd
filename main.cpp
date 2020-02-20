@@ -168,8 +168,8 @@ int main (int argc, char *argv[])
   const float height = 160.0;
   const float width = x_size_multiplier * height;
   const int steps_count = 1400;
-  const int process_nx = 900;
-  const int process_ny = process_nx;
+  const int process_nx = 2000;
+  const int process_ny = 500;
 
   /// Enable NVLINK
   {
