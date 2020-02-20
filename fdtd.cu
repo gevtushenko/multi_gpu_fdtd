@@ -99,9 +99,14 @@ __global__ void update_h_border_kernel (
   float * __restrict__ hy)
 {
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int ghost_layer_size = nx * (1 + R);
 
-  if (tid < nx * (1 + R))
-    update_h (nx, nx * (n_own_y - (R + 1)) + tid, dx, dy, ez, mh, hx, hy);
+  if (tid < ghost_layer_size) {
+      update_h (nx, tid, dx, dy, ez, mh, hx, hy); ///< Bottom part
+  }
+  else if (tid < ghost_layer_size * 2) {
+      update_h (nx, nx * (n_own_y - (R + 1)) + tid - ghost_layer_size, dx, dy, ez, mh, hx, hy);
+  }
 }
 
 __global__ void update_h_bulk_kernel (
@@ -119,7 +124,7 @@ __global__ void update_h_bulk_kernel (
   const int tid = blockIdx.x * blockDim.x + threadIdx.x;
 
   if (tid < nx * (n_own_y - 1 - R))
-    update_h (nx, tid, dx, dy, ez, mh, hx, hy);
+    update_h (nx, tid + nx * (R + 1), dx, dy, ez, mh, hx, hy);
 }
 
 __global__ void update_e_kernel (
@@ -147,7 +152,7 @@ __global__ void update_e_kernel (
 __global__ void update_e_bulk_kernel (
   int R,
   int nx,
-  int n_cells,
+  int n_own_y,
   int own_in_process_begin,
   int source_position,
 
@@ -163,13 +168,14 @@ __global__ void update_e_bulk_kernel (
 {
   const unsigned int cell_id = nx * (R + 1) + blockIdx.x * blockDim.x + threadIdx.x;
 
-  if (cell_id < n_cells)
+  if (cell_id < nx * (n_own_y - 1 - R))
     update_e (nx, cell_id, own_in_process_begin, source_position, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
 }
 
 __global__ void update_e_border_kernel (
   int R,
   int nx,
+  int n_own_y,
   int own_in_process_begin,
   int source_position,
 
@@ -183,10 +189,15 @@ __global__ void update_e_border_kernel (
   const float * __restrict__ hx,
   const float * __restrict__ hy)
 {
-  const unsigned int cell_id = blockIdx.x * blockDim.x + threadIdx.x;
+  const int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  const int ghost_layer_size = nx * (1 + R);
 
-  if (cell_id < nx * (R + 1))
-    update_e (nx, cell_id, own_in_process_begin, source_position, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
+  if (tid < ghost_layer_size) {
+      update_e (nx, tid, own_in_process_begin, source_position, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
+    }
+  else if (tid < ghost_layer_size * 2) {
+      update_e (nx, nx * (n_own_y - (R + 1)) + tid - ghost_layer_size, own_in_process_begin, source_position, t, dx, dy, C0_p_dt, ez, dz, er, hx, hy);
+    }
 }
 
 #include "vtk_writer.h"
@@ -369,8 +380,8 @@ void run_fdtd_copy_overlap (
   const int n_own_cells = grid_info.get_own_cells_count ();
   const int nx = grid_info.get_nx ();
   const int blocks_count = (n_own_cells + threads_per_block - 1) / threads_per_block;
-  const int borders_blocks_count = (nx * (1 + max_R) + threads_per_block - 1) / threads_per_block;
-  const int bulk_blocks_count = (n_own_cells - (nx * (1 + max_R)) + threads_per_block - 1) / threads_per_block;
+  const int borders_blocks_count = (2 * nx * (1 + max_R) + threads_per_block - 1) / threads_per_block;
+  const int bulk_blocks_count = (n_own_cells - 2 * (nx * (1 + max_R)) + threads_per_block - 1) / threads_per_block;
 
   float *own_er = grid_accessor.get_own_data (fdtd_fields::er);
   float *own_hr = grid_accessor.get_own_data (fdtd_fields::hr);
@@ -493,6 +504,7 @@ void run_fdtd_copy_overlap (
       /// Compute boundaries
       update_h_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_top_stream>>> (max_R, nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
       grid_accessor.async_send_top (fields_to_update_after_h, push_top_stream);
+      grid_accessor.async_send_bottom (fields_to_update_after_h, push_top_stream);
 
       cudaStreamSynchronize (push_top_stream);
       cudaStreamSynchronize (compute_stream);
@@ -500,14 +512,15 @@ void run_fdtd_copy_overlap (
 
       /// Compute bulk
       update_e_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (
-        max_R, nx, n_own_cells, grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
+        max_R, nx, grid_info.get_n_own_y (), grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
 
       /// Compute boundaries
       update_e_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_bottom_stream>>> (
-        max_R, nx, grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
+        max_R, nx, grid_info.get_n_own_y (), grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
       grid_accessor.async_send_bottom (fields_to_update_after_e, push_bottom_stream);
+      grid_accessor.async_send_top (fields_to_update_after_e, push_bottom_stream);
 
       cudaStreamSynchronize (push_bottom_stream);
       cudaStreamSynchronize (compute_stream);

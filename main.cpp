@@ -200,7 +200,7 @@ int main (int argc, char *argv[])
 
   if (argc == 2)
     {
-      run_and_save (3, steps_count, process_nx, process_ny, height, width, 1 /* write_each */, writer);
+      run_and_save (gpus_count, steps_count, process_nx, process_ny, height, width, 20 /* write_each */, writer);
     }
   else
     {
