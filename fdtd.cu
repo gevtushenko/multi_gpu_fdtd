@@ -33,8 +33,8 @@ __global__ void initialize_fields (
       const float y = static_cast<float> (yi) * dy;
 
       const float soil_y = static_cast<float> (ny) * dy / 2.2;
-      const float object_1_y = soil_y - 8.0;
-      const float object_2_y = soil_y - 18.0;
+      const float object_1_y = soil_y - 22.0;
+      const float object_2_y = soil_y - 24.0;
       const float object_1_size = 3.0;
       const float object_2_size = 8.0;
       const float soil_er_hr = 1.0; // 1.5
@@ -365,7 +365,7 @@ void run_fdtd_copy_overlap (
   const float dt = calculate_dt (grid_info.get_dx (), grid_info.get_dy ());
 
   const int max_R = grid_info.get_R ();
-  constexpr unsigned int threads_per_block = 1024;
+  constexpr unsigned int threads_per_block = 256;
   const int n_own_cells = grid_info.get_own_cells_count ();
   const int nx = grid_info.get_nx ();
   const int blocks_count = (n_own_cells + threads_per_block - 1) / threads_per_block;
@@ -410,31 +410,23 @@ void run_fdtd_copy_overlap (
 
   float *cpu_e = grid_accessor.cpu_field;
 
-  const std::vector<fdtd_fields> fields_to_update_after_h_base = {
+  const std::vector<fdtd_fields> fields_to_update_after_h = {
     fdtd_fields::hx,
     fdtd_fields::hy,
   };
 
-  const std::vector<fdtd_fields> fields_to_update_b2r = {
-    fdtd_fields::ez,
-    fdtd_fields::dz,
-    fdtd_fields::hx,
-    fdtd_fields::hy,
-  };
-
-  const std::vector<fdtd_fields> fields_to_update_after_h = max_R > 0 ? fields_to_update_b2r : fields_to_update_after_h_base;
-
-  const std::vector<fdtd_fields> fields_to_update_after_e_base = {
+  const std::vector<fdtd_fields> fields_to_update_after_e = {
     fdtd_fields::ez,
     fdtd_fields::dz,
   };
-  const std::vector<fdtd_fields> fields_to_update_after_e = max_R > 0 ? fields_to_update_b2r : fields_to_update_after_e_base;
 
-  const int source_position = (3 * grid_info.process_ny / 4) * nx + 2 * nx / 5 + source_x_offset;
+  const int source_position = (grid_info.process_ny / 2) * nx + 2 * nx / 5 + source_x_offset;
 
   /// 907 908
-  // std::unique_ptr<float[]> gpu_data_copy (new float[nx * grid_info.get_ny ()]);
-  // vtk_writer gpu_writer (dx, dy, nx, grid_info.get_ny (), "gpu_data_" + std::to_string (thread_info.thread_id));
+  std::unique_ptr<float[]> gpu_data_copy (new float[nx * grid_info.get_ny ()]);
+  vtk_writer gpu_writer (dx, dy, nx, grid_info.get_ny (), "gpu_data_dz_" + std::to_string (thread_info.thread_id));
+  const float *array_to_write = own_dz;
+  bool debug_writes = false;
 
   cudaEvent_t start, stop;
   cudaEventCreate (&start);
@@ -461,8 +453,10 @@ void run_fdtd_copy_overlap (
 
               if (write_each > 0 && step % write_each == 0)
                 {
-                  // cudaMemcpy (gpu_data_copy.get (), own_ez - nx * (max_R + 1), (n_own_cells + nx * 2 * (max_R + 1)) * sizeof (float), cudaMemcpyDeviceToHost);
-                  // gpu_writer.write_vtu (gpu_data_copy.get ());
+                  if (debug_writes) {
+                      cudaMemcpy (gpu_data_copy.get (), array_to_write - nx * (max_R + 1), (n_own_cells + nx * 2 * (max_R + 1)) * sizeof (float), cudaMemcpyDeviceToHost);
+                      gpu_writer.write_vtu (gpu_data_copy.get ());
+                  }
 
                   /// Write results
                   cudaMemcpy (
@@ -482,6 +476,8 @@ void run_fdtd_copy_overlap (
                     }
                   thread_info.sync ();
                 }
+
+              cudaStreamSynchronize (compute_stream);
 
               t += dt;
               step++;
@@ -519,8 +515,11 @@ void run_fdtd_copy_overlap (
 
       if (write_each > 0 && step % write_each == 0)
         {
-          // cudaMemcpy (gpu_data_copy.get (), own_hx - nx * (max_R + 1), (n_own_cells + nx * 2 * (max_R + 1)) * sizeof (float), cudaMemcpyDeviceToHost);
-          // gpu_writer.write_vtu (gpu_data_copy.get ());
+          if (debug_writes)
+            {
+              cudaMemcpy (gpu_data_copy.get (), array_to_write - nx * (max_R + 1), (n_own_cells + nx * 2 * (max_R + 1)) * sizeof (float), cudaMemcpyDeviceToHost);
+              gpu_writer.write_vtu (gpu_data_copy.get ());
+            }
 
           /// Write results
           cudaMemcpy (

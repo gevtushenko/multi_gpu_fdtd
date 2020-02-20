@@ -93,13 +93,16 @@ double run_fdtd (
   grid_barrier_class grid_barrier (devices_count, process_nx, process_ny, R);
   std::vector<double> elapsed_times (devices_count);
 
+  int gpus_count {};
+  cudaGetDeviceCount (&gpus_count);
+
   for (int device_id = 0; device_id < devices_count; device_id++)
     {
       thread_info_class thread_info (device_id, devices_count, barrier);
       threads.emplace_back([thread_info, process_nx, process_ny, steps_count, width, height, write_each, source_x_offset, R,
-                            &receiver, &elapsed_times, &writer, &grid_barrier, &action] () {
+                            &receiver, &elapsed_times, &writer, &grid_barrier, &action, gpus_count] () {
         try {
-            cudaSetDevice (thread_info.thread_id);
+            cudaSetDevice (thread_info.thread_id % gpus_count);
             grid_info_class grid_info (R, width, height, process_nx, process_ny, thread_info);
             print_memory_info (grid_info, thread_info);
             grid_barrier_accessor_class grid_barrier_accessor = grid_barrier.create_accessor (
@@ -165,7 +168,7 @@ int main (int argc, char *argv[])
   const float height = 160.0;
   const float width = x_size_multiplier * height;
   const int steps_count = 1400;
-  const int process_nx = 800;
+  const int process_nx = 900;
   const int process_ny = process_nx;
 
   /// Enable NVLINK
@@ -197,7 +200,7 @@ int main (int argc, char *argv[])
 
   if (argc == 2)
     {
-      run_and_save (gpus_count, steps_count, process_nx, process_ny, height, width, 1 /* write_each */, writer);
+      run_and_save (3, steps_count, process_nx, process_ny, height, width, 1 /* write_each */, writer);
     }
   else
     {

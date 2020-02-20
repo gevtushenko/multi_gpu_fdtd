@@ -24,6 +24,7 @@ public:
     int device_id_arg,
     int devices_count_arg,
     float **grid_arg,
+    int *nys_arg,
     int nx_arg, int ny_arg,
     int elements_per_cell_arg,
     float *cpu_field_arg)
@@ -37,9 +38,11 @@ public:
     , compute_h (compute_h_arg)
     , compute_e (compute_e_arg)
     , grid (grid_arg)
+    , nys (nys_arg)
     , elements_per_cell (elements_per_cell_arg)
     , cpu_field (cpu_field_arg)
   {
+    nys_arg[own_device_id] = ny;
     throw_on_error (cudaMalloc (&grid[own_device_id], nx * ny * elements_per_cell * sizeof (float)), __FILE__, __LINE__);
     throw_on_error (cudaEventCreateWithFlags (get_top_done (own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
     throw_on_error (cudaEventCreateWithFlags (get_bottom_done (own_device_id), cudaEventDisableTiming), __FILE__, __LINE__);
@@ -83,7 +86,7 @@ public:
   template <typename enum_type>
   float *get_top_copy_dst (enum_type field_num)
   {
-    return grid[get_neighbor_device_top ()] + static_cast<int> (field_num) * (nx * ny);
+    return grid[get_neighbor_device_top ()] + static_cast<int> (field_num) * (nx * nys[get_neighbor_device_top ()]);
   }
 
   template <typename enum_type>
@@ -97,7 +100,7 @@ public:
   template <typename enum_type>
   float *get_bottom_copy_dst (enum_type field_num)
   {
-    return grid[get_neighbor_device_bottom ()] + static_cast<int> (field_num) * (nx * ny) + (nx * ny) - ghost_layer_size ();
+    return grid[get_neighbor_device_bottom ()] + (static_cast<int> (field_num) + 1) * (nx * nys[get_neighbor_device_bottom ()]) - ghost_layer_size ();
   }
 
   template <typename enum_type>
@@ -122,7 +125,10 @@ public:
   template <typename enum_type>
   void sync_send_bottom (enum_type field_num)
   {
-    throw_on_error (cudaMemcpy (get_bottom_copy_dst (field_num), get_bottom_copy_src (field_num), ghost_layer_size_in_bytes (), cudaMemcpyDeviceToDevice), __FILE__, __LINE__);
+    auto dst = get_bottom_copy_dst (field_num);
+    auto src = get_bottom_copy_src (field_num);
+    auto n = ghost_layer_size_in_bytes ();
+    throw_on_error (cudaMemcpy (dst, src, n, cudaMemcpyDeviceToDevice), __FILE__, __LINE__);
   }
 
   template <typename enum_type>
@@ -188,6 +194,7 @@ private:
   cudaEvent_t *compute_h {};
   cudaEvent_t *compute_e {};
   float **grid {};
+  const int *nys {};
   const int elements_per_cell {};
 
 public:
@@ -205,6 +212,7 @@ public:
     , compute_h (new cudaEvent_t[devices_count])
     , compute_e (new cudaEvent_t[devices_count])
     , grid (new float*[devices_count])
+    , nys (new int[devices_count])
   {
     throw_on_error (cudaMallocHost (&cpu_field, process_nx * process_ny * sizeof (float)), __FILE__, __LINE__);
   }
@@ -224,7 +232,7 @@ public:
       compute_e.get (),
       device_id,
       devices_count,
-      grid.get (),
+      grid.get (), nys.get (),
       nx, ny,
       elements_per_cell,
       cpu_field
@@ -240,6 +248,7 @@ private:
   std::unique_ptr<cudaEvent_t[]> compute_e;
 
   std::unique_ptr<float*[]> grid;
+  std::unique_ptr<int[]> nys;
   float *cpu_field {};
 };
 
