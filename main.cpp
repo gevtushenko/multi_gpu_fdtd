@@ -143,7 +143,7 @@ void run_and_save (
 
   for (const auto &source_x_offset: source_x_offsets)
     run_fdtd (
-      2, devices_count, steps_count, process_nx, process_ny, height, width, write_each, source_x_offset, receiver, writer,
+      0, devices_count, steps_count, process_nx, process_ny, height, width, write_each, source_x_offset, receiver, writer,
       [] (
         int steps,
         int write_each,
@@ -155,7 +155,7 @@ void run_and_save (
         grid_barrier_accessor_class &grid_accessor,
         const thread_info_class &thread_info)
       {
-        run_fdtd_b2r_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
+        run_fdtd_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
       });
 }
 
@@ -205,6 +205,8 @@ int main (int argc, char *argv[])
   else
     {
       receiver_writer receiver (0, 0);
+
+      /*
       const double single_gpu_time = run_fdtd (0, 1, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
         (
           int steps,
@@ -220,8 +222,12 @@ int main (int argc, char *argv[])
         run_fdtd (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
       });
 
+      std::cout << "Time per row: " << process_nx * single_gpu_time / (process_nx * process_ny * steps_count) << std::endl;
+       */
+
       for (int devices_count = 2; devices_count <= gpus_count; devices_count++)
         {
+          /*
           const double max_time = run_fdtd (0, devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
             (
               int steps,
@@ -236,6 +242,8 @@ int main (int argc, char *argv[])
           {
             run_fdtd (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
           });
+           */
+
           const double max_overlap_time = run_fdtd (0, devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
             (
               int steps,
@@ -251,6 +259,8 @@ int main (int argc, char *argv[])
             run_fdtd_copy_overlap (steps, write_each, source_x_offset, elapsed_times, grid_info, receiver, writer, grid_accessor, thread_info);
           });
 
+          /*
+          ///
           const double max_overlap_time_R1 = run_fdtd (1, devices_count, steps_count, process_nx, process_ny, height, width, -1, 0, receiver, writer, []
             (
               int steps,
@@ -287,6 +297,7 @@ int main (int argc, char *argv[])
           std::cout << "Parallel efficiency (overlap): " << single_gpu_time / max_overlap_time / devices_count << " (" << max_overlap_time << " s)" << std::endl;
           std::cout << "Parallel efficiency (overlap, R=1): " << single_gpu_time / max_overlap_time_R1 / devices_count << " (" << max_overlap_time_R1 << " s)" << std::endl;
           std::cout << "Parallel efficiency (overlap, R=2): " << single_gpu_time / max_overlap_time_R2 / devices_count << " (" << max_overlap_time_R2 << " s)" << std::endl;
+           */
         }
     }
 

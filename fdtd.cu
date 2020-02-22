@@ -349,6 +349,8 @@ void run_fdtd (
       t += dt;
     }
 
+  std::cout << "Transfer size for R=0 is " << static_cast<double> (grid_accessor.ghost_layer_size_in_bytes ()) / 1024 << " KB\n";
+
   float milliseconds = 0.0;
   cudaEventRecord (stop);
   cudaEventSynchronize (stop);
@@ -417,7 +419,7 @@ void run_fdtd_b2r_copy_overlap (
   cudaStream_t compute_stream, push_top_stream, push_bottom_stream;
   throw_on_error (cudaStreamCreateWithPriority (&compute_stream, cudaStreamDefault, least_priority), __FILE__, __LINE__);
   throw_on_error (cudaStreamCreateWithPriority (&push_top_stream, cudaStreamDefault, highest_priority), __FILE__, __LINE__);
-  throw_on_error (cudaStreamCreateWithPriority (&push_bottom_stream, cudaStreamDefault, least_priority), __FILE__, __LINE__);
+  throw_on_error (cudaStreamCreateWithPriority (&push_bottom_stream, cudaStreamDefault, highest_priority), __FILE__, __LINE__);
 
   float *cpu_e = grid_accessor.cpu_field;
 
@@ -444,6 +446,9 @@ void run_fdtd_b2r_copy_overlap (
   cudaEventCreate (&stop);
 
   cudaEventRecord (start);
+
+  if (thread_info.thread_id == 0)
+    std::cout << "Transfer size for R=" << max_R << " is " << static_cast<double> (grid_accessor.ghost_layer_size_in_bytes ()) / 1024 << " KB\n";
 
   for (int step = 0; step < steps; step++)
     {
@@ -705,7 +710,7 @@ void run_fdtd_copy_overlap (
   cudaStream_t compute_stream, push_top_stream, push_bottom_stream;
   throw_on_error (cudaStreamCreateWithPriority (&compute_stream, cudaStreamDefault, least_priority), __FILE__, __LINE__);
   throw_on_error (cudaStreamCreateWithPriority (&push_top_stream, cudaStreamDefault, highest_priority), __FILE__, __LINE__);
-  throw_on_error (cudaStreamCreateWithPriority (&push_bottom_stream, cudaStreamDefault, least_priority), __FILE__, __LINE__);
+  throw_on_error (cudaStreamCreateWithPriority (&push_bottom_stream, cudaStreamDefault, highest_priority), __FILE__, __LINE__);
 
   float *cpu_e = grid_accessor.cpu_field;
 
@@ -718,7 +723,16 @@ void run_fdtd_copy_overlap (
     fdtd_fields::ez,
   };
 
-  const int source_position = (grid_info.process_ny / 2) * nx + 2 * nx / 5 + source_x_offset;
+  const int source_position = (2 * grid_info.process_ny / 3) * nx + 2 * nx / 5 + source_x_offset;
+
+  cudaEvent_t h_bulk_computed, h_border_computed;
+  cudaEvent_t e_bulk_computed, e_border_computed;
+
+  cudaEventCreateWithFlags (&h_bulk_computed, cudaEventDisableTiming);
+  cudaEventCreateWithFlags (&h_border_computed, cudaEventDisableTiming);
+
+  cudaEventCreateWithFlags (&e_bulk_computed, cudaEventDisableTiming);
+  cudaEventCreateWithFlags (&e_border_computed, cudaEventDisableTiming);
 
   cudaEvent_t start, stop;
   cudaEventCreate (&start);
@@ -729,29 +743,35 @@ void run_fdtd_copy_overlap (
   for (int step = 0; step < steps; step++)
     {
       /// Compute bulk
+      cudaStreamWaitEvent (compute_stream, e_border_computed, 0);
       update_h_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
+      cudaEventRecord(h_bulk_computed, compute_stream);
 
       /// Compute boundaries
+      cudaStreamWaitEvent (push_top_stream, e_bulk_computed, 0);
+      cudaStreamWaitEvent (push_top_stream, *grid_accessor.get_bottom_done (grid_accessor.get_neighbor_device_top ()), 0);
       update_h_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_top_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
-      grid_accessor.async_send_top (fields_to_update_after_h, push_top_stream);
+      cudaEventRecord(h_border_computed, push_top_stream);
 
-      cudaStreamSynchronize (push_top_stream);
-      cudaStreamSynchronize (compute_stream);
+      grid_accessor.async_send_top (fields_to_update_after_h, push_top_stream);
       thread_info.sync ();
 
       /// Compute bulk
+      cudaStreamWaitEvent (compute_stream, h_border_computed, 0);
       update_e_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (
         nx, n_own_cells, grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
+      cudaEventRecord(e_bulk_computed, compute_stream);
 
       /// Compute boundaries
+      cudaStreamWaitEvent (push_bottom_stream, h_bulk_computed, 0);
+      cudaStreamWaitEvent (push_bottom_stream, *grid_accessor.get_top_done (grid_accessor.get_neighbor_device_bottom ()), 0);
       update_e_border_kernel<<<borders_blocks_count, threads_per_block, 0, push_bottom_stream>>> (
         nx, grid_info.get_row_begin_in_process(), source_position, t, dx, dy,
           C0_p_dt, own_ez, own_dz, own_er, own_hx, own_hy);
-      grid_accessor.async_send_bottom (fields_to_update_after_e, push_bottom_stream);
+      cudaEventRecord(e_border_computed, push_bottom_stream);
 
-      cudaStreamSynchronize (push_bottom_stream);
-      cudaStreamSynchronize (compute_stream);
+      grid_accessor.async_send_bottom (fields_to_update_after_e, push_bottom_stream);
       thread_info.sync ();
 
       if (write_each > 0 && step % write_each == 0)
@@ -787,6 +807,11 @@ void run_fdtd_copy_overlap (
 
   cudaEventDestroy (stop);
   cudaEventDestroy (start);
+
+  cudaEventDestroy (e_bulk_computed);
+  cudaEventDestroy (e_border_computed);
+  cudaEventDestroy (h_bulk_computed);
+  cudaEventDestroy (h_border_computed);
 
   throw_on_error (cudaStreamDestroy (push_top_stream), __FILE__, __LINE__);
   throw_on_error (cudaStreamDestroy (push_bottom_stream), __FILE__, __LINE__);
