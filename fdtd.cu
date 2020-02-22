@@ -742,6 +742,9 @@ void run_fdtd_copy_overlap (
 
   for (int step = 0; step < steps; step++)
     {
+      if (step % 4 == 0)
+        cudaStreamSynchronize (compute_stream);
+
       /// Compute bulk
       cudaStreamWaitEvent (compute_stream, e_border_computed, 0);
       update_h_bulk_kernel<<<bulk_blocks_count, threads_per_block, 0, compute_stream>>> (nx, grid_info.get_n_own_y (), dx, dy, own_ez, own_mh, own_hx, own_hy);
